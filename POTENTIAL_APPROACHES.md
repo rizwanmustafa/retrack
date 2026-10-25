@@ -145,6 +145,25 @@ lowers clean accuracy.
 **Evaluation.** `perturb_eval` rotated-camera faults (one camera and all cameras) against the baseline, plus the clean
 score, over 3 seeds.
 
+**Result (seed 1): works.** Bar agreed before the run: halve the loss under roll/pitch σ = 0.5°, gain at least 5 MODA
+with all cameras rotated 0.75°, lose at most 0.5 MODA with clean calibration.
+
+| Criterion | `concat` → `concat_calib` | `masked_drop` → `masked_calib` |
+|---|---|---|
+| ΔMODA under roll/pitch σ = 0.5° | −13.1 → **−2.4** ✅ | −9.4 → **−2.2** ✅ |
+| MODA, all cameras 0.75° | 72.9 → **81.3 (+8.4)** ✅ | 77.5 → 82.1 (+4.6) ❌ just misses |
+| MODA, clean calibration | 90.9 → **92.0 (+1.1)** ✅ | 90.4 → 89.7 (−0.7) ❌ just misses |
+
+Under larger errors the gain grows: all cameras 1° 43.5 → 67.0; roll/pitch σ = 1° 65.4 → 85.9; all 7 cameras at 1°
+45.0 → 73.4. The spread between random draws also collapses (σ = 0.5°: ±12.3 → ±1.5), so one badly tilted camera no
+longer ruins the result. With clean calibration `concat_calib` is the best model so far (MODA 92.0, MOTA 91.2,
+IDF1 95.2, close to the paper's 92.1 / 91.8 / 95.3); a plausible reason is that WILDTRACK's own calibration already
+has 2–17 px of error, so tolerating small misalignment helps on clean data too. Once trained with calibration noise,
+masked fusion is no more robust than concatenation (1°: 67.7 vs 67.0) and is lower on clean data.
+
+Caveat: one seed. The robustness gains (+8 to +28 MODA) are far beyond noise; the +1.1 clean gain is not yet. A
+confirmation run with two more seeds of `concat` and `concat_calib` is next.
+
 ## Approach 2: Detect and drop the faulty camera
 
 **Idea.** A wrong camera is worse than a missing one (about −20 MODA vs −1 to −2 for a dropped camera). If a camera
@@ -233,9 +252,11 @@ authors attribute to overfitting the small dataset. Hard to justify for this pro
 
 ## Recommendation
 
-1. **Approach 1 first**: cheap, has published precedent, and gives a fair comparison with the literature. Run it
-   on both concatenation and masked fusion, since masked fusion is already the more robust and lighter model.
-2. **Then Approach 2 or 3 as the project's own contribution.** Approach 3 is the strongest story (a system that
+1. **Approach 1 first**: cheap, has published precedent, and gives a fair comparison with the literature. **Done
+   (seed 1): passes for concatenation (`concat_calib`), narrowly misses for masked fusion.** Confirm with more
+   seeds.
+2. **Then Approach 2 or 3 for what training cannot fix**: frozen and lagging cameras, and errors well beyond the
+   training noise. Approach 3 is the strongest story (a system that
    recalibrates itself) but is real research and may not work; Approach 2 is the safer fallback and reuses the
    camera masking built for Stage 4.
 3. Skip Approach 4 unless the others clearly fail.

@@ -55,12 +55,21 @@ Compared draw by draw with the concatenation model trained with the same camera 
 all 20 draws checked. A plausible reason: averaging over the cameras that see a cell weakens the effect of one
 misaligned view, whereas the concatenation convolution has learned to rely on every view being aligned.
 
+### With calibration-noise training
+
+Calibration-noise training (Approach 1 in `POTENTIAL_APPROACHES.md`) closes the robustness gap: trained with the same
+noise, concatenation and masked fusion are about equally robust (all cameras 1°: MODA 67.0 vs 67.7; roll/pitch
+σ = 0.5°: 89.6 vs 87.5), and concatenation is better with clean calibration (92.0 vs 89.7). So masked fusion's
+robustness advantage only holds for models trained without calibration noise; its remaining advantage is size and
+training speed.
+
 ## Interpretation
 
 - For **tracking**, which is what the live system shows, the lighter model is as good as TrackTacular.
 - For **detection**, it is about 0.5–1 MODA lower, roughly 5–10 people over the 40 test frames.
-- It is a reasonable default for the web system, where speed and memory matter more than the last MODA point,
-  and where cameras drift over time: it is also 4–8 MODA more robust to calibration errors.
+- It is a reasonable default for the web system when speed and memory matter more than the last MODA point. Without
+  calibration-noise training it is also 4–8 MODA more robust to calibration errors; with it, `concat_calib` is as
+  robust and more accurate, so choose between them on speed versus accuracy.
 
 ## Caveats and next steps
 

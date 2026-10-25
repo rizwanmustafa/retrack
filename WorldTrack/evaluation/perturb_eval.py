@@ -161,19 +161,30 @@ def calib_sweep_model(ckpt, tag, variant, data_dir, out_dir, draws=5, max_frames
 
 
 def summarise_sweep(df):
+    """
+    Per (variant, protocol, magnitude): MODA averaged over draws and seeds. ΔMODA is against each seed's own clean
+    score. "±" is the std over random draws for a single seed, and the std over seeds when there are several.
+    """
     lines = []
     for variant, g in df.groupby('variant', sort=False):
-        clean = g[g.protocol == 'clean'].iloc[0]
-        lines.append(f'\n### {variant}  (clean: MODA {clean.moda:.1f}, MOTA {clean.S0_mota:.1f}, IDF1 {clean.S0_idf1:.1f})\n')
-        lines.append('| protocol | magnitude | reprojection error (px) | ground shift | MODA (mean ± std over draws) | ΔMODA | recall '
-                     '| precision | MOTA (S0) | IDF1 (S0) | MOTA (S2) | IDF1 (S2) |')
+        clean = g[g.protocol == 'clean'].set_index('tag')
+        n = len(clean)
+        lines.append(f'\n### {variant}  ({n} seed{"s" if n > 1 else ""}; clean: MODA {clean.moda.mean():.1f}, '
+                     f'MOTA {clean.S0_mota.mean():.1f}, IDF1 {clean.S0_idf1.mean():.1f})\n')
+        lines.append(f'| protocol | magnitude | reprojection error (px) | ground shift | MODA (mean ± std over '
+                     f'{"seeds" if n > 1 else "draws"}) | ΔMODA | recall | precision | MOTA (S0) | IDF1 (S0) '
+                     f'| MOTA (S2) | IDF1 (S2) |')
         lines.append('|---|---|---|---|---|---|---|---|---|---|---|---|')
         for (protocol, mag), h in g[g.protocol != 'clean'].groupby(['protocol', 'magnitude'], sort=False):
             name, value = {'fixed_angle': ('fixed angle, all cameras', f'{mag:g}°'),
                            'roll_pitch_gauss': ('roll/pitch Gaussian, all cameras', f'σ = {mag:g}°'),
                            'k_cameras': (f'{K_CAMERAS_ANGLE:g}° on k cameras', f'k = {int(mag)}')}[protocol]
-            lines.append(f'| {name} | {value} | {h.pixel_error.median():.0f} | {h.ground_shift.median():.0f} | {h.moda.mean():.1f} ± {h.moda.std():.1f} '
-                         f'| {h.moda.mean() - clean.moda:+.1f} | {h.recall.mean():.1f} | {h.precision.mean():.1f} '
+            per_seed = h.groupby('tag').moda.mean()
+            spread = per_seed.std() if n > 1 else h.moda.std()
+            delta = (per_seed - clean.moda).dropna().mean()
+            px = h.pixel_error.median() if 'pixel_error' in h else float('nan')
+            lines.append(f'| {name} | {value} | {px:.0f} | {h.ground_shift.median():.0f} | {per_seed.mean():.1f} '
+                         f'± {spread:.1f} | {delta:+.1f} | {h.recall.mean():.1f} | {h.precision.mean():.1f} '
                          f'| {h.S0_mota.mean():.1f} | {h.S0_idf1.mean():.1f} | {h.S2_mota.mean():.1f} '
                          f'| {h.S2_idf1.mean():.1f} |')
     return '\n'.join(lines)
@@ -241,34 +252,39 @@ def evaluate_model(ckpt, tag, variant, data_dir, out_dir, cams=None, max_frames=
 
 
 def summarise(df):
-    """Mean over cameras per (variant, fault) and the fraction of cameras where the fault is worse than dropping."""
-    clean = df[df.kind == 'clean'].set_index('variant')
-    drop = df[df.kind == 'drop'].set_index(['variant', 'cameras'])['moda']
+    """
+    Mean over cameras (and seeds) per (variant, fault). ΔMODA is taken against each seed's own clean score; "worse
+    than dropping" counts (seed, camera) pairs where the fault gives lower MODA than switching that camera off.
+    """
+    drop = df[df.kind == 'drop'].set_index(['tag', 'cameras'])['moda']
     lines = []
     for variant, g in df.groupby('variant', sort=False):
-        c = clean.loc[variant]
-        lines.append(f'\n### {variant}  (clean: MODA {c.moda:.1f}, MOTA {c.S0_mota:.1f}, IDF1 {c.S0_idf1:.1f})\n')
+        clean = g[g.kind == 'clean'].set_index('tag')
+        n = len(clean)
+        lines.append(f'\n### {variant}  ({n} seed{"s" if n > 1 else ""}; clean: MODA {clean.moda.mean():.1f}, '
+                     f'MOTA {clean.S0_mota.mean():.1f}, IDF1 {clean.S0_idf1.mean():.1f})\n')
         lines.append('| fault | MODA | ΔMODA | recall | precision | MOTA (S0) | IDF1 (S0) | MOTA (S2) | IDF1 (S2) '
                      '| worse than dropping the camera |')
         lines.append('|---|---|---|---|---|---|---|---|---|---|')
         for (kind, mag), h in g[g.kind != 'clean'].groupby(['kind', 'magnitude'], sort=False):
             label = {'drop': 'camera dropped', 'rot': f'1 camera rotated {mag}°', 'rot_all': f'all cameras rotated {mag}°',
                      'lag': f'1 camera {int(mag)} frame(s) late', 'freeze': '1 camera frozen'}[kind]
+            delta = (h.groupby('tag').moda.mean() - clean.moda).dropna().mean()
             worse = ''
             if kind in ('rot', 'lag', 'freeze'):
-                n = sum(r.moda < drop.loc[(variant, r.cameras)] for r in h.itertuples())
-                worse = f'{n}/{len(h)}'
-            lines.append(f'| {label} | {h.moda.mean():.1f} | {h.moda.mean() - c.moda:+.1f} | {h.recall.mean():.1f} '
+                n_worse = sum(r.moda < drop.loc[(r.tag, r.cameras)] for r in h.itertuples())
+                worse = f'{n_worse}/{len(h)}'
+            lines.append(f'| {label} | {h.moda.mean():.1f} | {delta:+.1f} | {h.recall.mean():.1f} '
                          f'| {h.precision.mean():.1f} | {h.S0_mota.mean():.1f} | {h.S0_idf1.mean():.1f} '
                          f'| {h.S2_mota.mean():.1f} | {h.S2_idf1.mean():.1f} | {worse} |')
     return '\n'.join(lines)
 
 
-def find_runs(results, seed):
+def find_runs(results, seeds):
     runs = []
     for p in sorted(glob.glob(osp.join(results, 'runs', '*', 'DONE.json'))):
         info = json.load(open(p))
-        if seed is None or int(info['seed']) == seed:
+        if not seeds or int(info['seed']) in seeds:
             runs.append((info['ckpt'], f"{info['variant']}_s{info['seed']}", info['variant']))
     return runs
 
@@ -276,7 +292,7 @@ def find_runs(results, seed):
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('--results', help='pipeline results folder: evaluates every finished run of --seed')
-    p.add_argument('--seed', type=int, default=80085)
+    p.add_argument('--seed', type=int, nargs='+', default=[80085], help='training seeds to evaluate')
     p.add_argument('--ckpt', action='append', default=[], help='evaluate this checkpoint (repeatable)')
     p.add_argument('--data_dir', required=True)
     p.add_argument('--out', default=None, help='default: <results>/perturb')

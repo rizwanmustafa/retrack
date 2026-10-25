@@ -97,6 +97,10 @@ All on WILDTRACK, retrained TrackTacular (Segnet, bilinear sampling), seed 1, al
 - **Camera faults (robustness pilot)**: a frozen camera is worse than a dropped one for 7 of 7 cameras; 1–2° of drift
   or 1–2 frames of lag is worse for most cameras; **1° of calibration error on all cameras costs 35 MODA**
   (90.9 → 55.5), mostly through missed people (recall 95% → 61%).
+- **Calibration-noise training fixes most of it** (Approach 1, seed 1): TrackTacular trained with Gaussian roll/pitch
+  noise (σ = 0.5°) on random camera subsets loses 2.4 instead of 13.1 MODA under σ = 0.5° noise, scores 67.0 instead
+  of 43.5 with every camera rotated 1°, and is slightly better with clean calibration (MODA 92.0 vs 90.9). To be
+  confirmed with more seeds.
 - **Sensitivity is much higher than in driving benchmarks**: NCGR stresses models with errors of up to 15°, while
   TrackTacular collapses at 1°. A plausible reason is the metric: pedestrian detection is scored within 0.5 m on the
   ground, which is far stricter than nuScenes' detection score. To be confirmed by the calibration sweep (which also
