@@ -37,6 +37,23 @@ Status labels:
 | *Robust multi-camera BEV perception: an image-perceptive approach* (IROS 2024) | Claims resilience to calibration errors and pose fluctuations on nuScenes. Perturbation protocol unknown. | From search summary |
 | *CalibRobustBEV* (JUSTC) | BEV multi-modal detector that generates miscalibration scenarios during training. Camera + LiDAR, not camera-only. | From search summary |
 
+## 3b. Choosing perturbation magnitudes for fixed cameras
+
+The driving literature is a guide to *what* to perturb, not *how much*. Vehicle rigs suffer vibration and body
+motion, so NCGR stress-tests with errors of up to 15°; RoboBEV contributes fault types (camera crash, frame lost)
+but no calibration angles. Fixed surveillance cameras drift far less, so this project:
+
+- uses small angles only (0.25°–1.5°), and the roll/pitch protocol from **roadside** work (BEVHeight, CoBEV), whose
+  cameras are fixed on poles like surveillance cameras;
+- reports every perturbation as a **reprojection error in pixels** (the standard calibration-quality measure) and as
+  the resulting **ground shift in cm** (`--mode calib_sweep`);
+- anchors "realistic" to a measurement: WILDTRACK's own calibration already has **2–17 px** median reprojection error
+  per camera (`python -m evaluation.diagnose`). Perturbations within that range are errors a real installation
+  already has; larger ones model a camera that has been knocked or a poorer calibration.
+
+Interpretation of the pilot follows from this: if the all-camera cliff lies beyond ~17 px, it describes a degraded
+installation rather than a typical one, and the results should be framed that way.
+
 ## 4. Fixes in the literature (relevant to the approaches)
 
 | Approach in `POTENTIAL_APPROACHES.md` | Precedent |

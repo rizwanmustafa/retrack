@@ -81,12 +81,15 @@ def sweep_conditions(num_cams, draws, seed=0):
     return conds
 
 
-def ground_displacement(items, spec, frame_step=4):
+def ground_displacement(items, spec, frame_step=4, original_width=1920):
     """
-    Median distance (world units) by which a wrong calibration moves ground points: project ground-truth positions
-    into each camera with the true calibration, back-project the pixels to the ground with the perturbed one.
+    How far a wrong calibration moves ground points, as (median ground shift in world units, median reprojection
+    error in pixels at the original image resolution). Ground-truth positions are projected into each camera with
+    the true calibration and back-projected to the ground with the perturbed one; the pixel error is the distance
+    between projecting with the true and with the perturbed calibration (the usual calibration-quality measure, so it
+    can be compared with WILDTRACK's own calibration error from evaluation/diagnose.py).
     """
-    dists = []
+    dists, pixels = [], []
     for item in items[::frame_step]:
         gt = item['grid_gt'][0]
         gt = gt[gt.sum(1) != 0][:, :2].float()
@@ -109,7 +112,13 @@ def ground_displacement(items, spec, frame_step=4):
             if ok.any():
                 xy = back[:2, ok] / back[2, ok]
                 dists.append((xy - ground[:2, ok]).norm(dim=0))
-    return float(torch.cat(dists).median()) if dists else float('nan')
+            pix_wrong = H_wrong @ ground
+            ok = visible & (pix_wrong[2] > 0)
+            if ok.any():
+                u_wrong = pix_wrong[:2, ok] / pix_wrong[2, ok]
+                pixels.append((u_wrong - u[:, ok]).norm(dim=0) * (original_width / W_img))
+    med = lambda xs: float(torch.cat(xs).median()) if xs else float('nan')
+    return med(dists), med(pixels)
 
 
 def condition_metrics(frames):
@@ -136,11 +145,13 @@ def calib_sweep_model(ckpt, tag, variant, data_dir, out_dir, draws=5, max_frames
     rows, t0 = [], time.time()
     for protocol, mag, draw, spec in sweep_conditions(num_cams, draws):
         perturb = None if spec is None else make_perturb('rot_all', list(spec), spec, items)
+        shift, px = (0.0, 0.0) if spec is None else ground_displacement(items, spec)
         row = {'tag': tag, 'variant': variant, 'protocol': protocol, 'magnitude': mag, 'draw': draw,
-               'ground_shift': 0.0 if spec is None else ground_displacement(items, spec)}
+               'ground_shift': shift, 'pixel_error': px}
         row.update(condition_metrics(run_inference(model, items, perturb=perturb)))
         rows.append(row)
-        print(f'[{tag}] {protocol:16s} {mag:<5} draw {draw}  ground shift {row["ground_shift"]:6.1f}  '
+        print(f'[{tag}] {protocol:16s} {mag:<5} draw {draw}  shift {row["ground_shift"]:5.1f} cm '
+              f'{row["pixel_error"]:5.1f} px  '
               f'MODA {row["moda"]:6.2f}  recall {row["recall"]:6.2f}  MOTA {row["S0_mota"]:6.2f}  '
               f'({time.time() - t0:.0f}s)', flush=True)
     df = pd.DataFrame(rows)
@@ -154,14 +165,14 @@ def summarise_sweep(df):
     for variant, g in df.groupby('variant', sort=False):
         clean = g[g.protocol == 'clean'].iloc[0]
         lines.append(f'\n### {variant}  (clean: MODA {clean.moda:.1f}, MOTA {clean.S0_mota:.1f}, IDF1 {clean.S0_idf1:.1f})\n')
-        lines.append('| protocol | magnitude | ground shift | MODA (mean ± std over draws) | ΔMODA | recall '
+        lines.append('| protocol | magnitude | reprojection error (px) | ground shift | MODA (mean ± std over draws) | ΔMODA | recall '
                      '| precision | MOTA (S0) | IDF1 (S0) | MOTA (S2) | IDF1 (S2) |')
-        lines.append('|---|---|---|---|---|---|---|---|---|---|---|')
+        lines.append('|---|---|---|---|---|---|---|---|---|---|---|---|')
         for (protocol, mag), h in g[g.protocol != 'clean'].groupby(['protocol', 'magnitude'], sort=False):
             name, value = {'fixed_angle': ('fixed angle, all cameras', f'{mag:g}°'),
                            'roll_pitch_gauss': ('roll/pitch Gaussian, all cameras', f'σ = {mag:g}°'),
                            'k_cameras': (f'{K_CAMERAS_ANGLE:g}° on k cameras', f'k = {int(mag)}')}[protocol]
-            lines.append(f'| {name} | {value} | {h.ground_shift.median():.0f} | {h.moda.mean():.1f} ± {h.moda.std():.1f} '
+            lines.append(f'| {name} | {value} | {h.pixel_error.median():.0f} | {h.ground_shift.median():.0f} | {h.moda.mean():.1f} ± {h.moda.std():.1f} '
                          f'| {h.moda.mean() - clean.moda:+.1f} | {h.recall.mean():.1f} | {h.precision.mean():.1f} '
                          f'| {h.S0_mota.mean():.1f} | {h.S0_idf1.mean():.1f} | {h.S2_mota.mean():.1f} '
                          f'| {h.S2_idf1.mean():.1f} |')
@@ -294,8 +305,10 @@ if __name__ == '__main__':
                for ckpt, tag, variant in runs]
         text = '# Calibration sweep: every camera miscalibrated\n' \
                f'Threshold 0.5. {args.draws} random draws per setting. The model keeps the original calibration ' \
-               'while the cameras are rotated. "Ground shift" = median distance a ground point moves when ' \
-               'projected into a camera and back with the wrong calibration (cm on WILDTRACK). ' \
+               'while the cameras are rotated. "Reprojection error" = median pixel error the wrong calibration ' \
+               'causes at full resolution (1920x1080), comparable with WILDTRACK\'s own calibration error of ' \
+               '2-17 px per camera (evaluation/diagnose.py). "Ground shift" = median distance a ground point moves ' \
+               'when projected into a camera and back with the wrong calibration (cm on WILDTRACK). ' \
                'S0 = TrackTacular tracker, S2 = ByteTrack-style tracker.\n' + \
                summarise_sweep(pd.concat(dfs, ignore_index=True))
         with open(osp.join(out_dir, 'CALIB_SWEEP.md'), 'w') as f:
