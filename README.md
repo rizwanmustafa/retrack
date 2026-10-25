@@ -6,10 +6,53 @@ the TrackTacular baseline with Retrack on WILDTRACK, with all cameras and with c
 
 ## Run everything in Colab (one cell)
 
-1. Open `Retrack_Colab.ipynb` in Colab (File → Open notebook → GitHub → `rizwanmustafa/retrack`), or paste its single
-   cell into a new notebook.
+1. Open `Retrack_Colab.ipynb` in Colab (File → Open notebook → GitHub → `rizwanmustafa/retrack`), or create a new
+   notebook and paste the cell below.
 2. Runtime → Change runtime type → **A100 GPU**, High-RAM.
-3. Set `MODE` (`'quick'` first, then `'full'`) and run the cell.
+3. Set `MODE` (`'quick'` first, then `'full'`) and `BRANCH`, then run the cell.
+
+```python
+#@title Retrack — TrackTacular baseline vs Retrack (run this one cell)
+# Runtime > Change runtime type > A100 GPU (High-RAM). Everything is saved to Google Drive and the cell resumes
+# where it stopped if Colab disconnects: just run it again.
+MODE    = 'quick'   # 'quick': 2-epoch run of the whole pipeline (~1-2 h) to check it works | 'full': the study
+SEEDS   = 3         # training seeds per fusion variant in 'full' mode (5 variants x SEEDS runs of 30 epochs)
+RESULTS = '/content/drive/MyDrive/retrack_results'
+REPO    = 'github.com/rizwanmustafa/retrack.git'
+BRANCH  = 'main'    # use 'feat/retrack' until that branch is merged into main
+
+import os, glob
+from google.colab import drive, userdata
+drive.mount('/content/drive')
+
+def secret(name):
+    try:
+        return userdata.get(name)
+    except Exception:
+        return None
+
+# Optional Colab Secrets (key icon on the left): KAGGLE_USERNAME / KAGGLE_KEY if the WILDTRACK download is refused,
+# GITHUB_TOKEN if the repository is private.
+for k in ('KAGGLE_USERNAME', 'KAGGLE_KEY'):
+    if secret(k):
+        os.environ[k] = secret(k)
+url = f"https://{secret('GITHUB_TOKEN')}@{REPO}" if secret('GITHUB_TOKEN') else f'https://{REPO}'
+if not os.path.exists('/content/retrack'):
+    !git clone -q -b {BRANCH} {url} /content/retrack
+else:
+    !git -C /content/retrack fetch -q origin {BRANCH} && git -C /content/retrack checkout -q {BRANCH} && git -C /content/retrack pull -q origin {BRANCH}
+
+extra = f'--seeds {SEEDS}' if MODE == 'full' else ''
+!bash /content/retrack/colab/run.sh {MODE} {RESULTS} {extra}
+
+from IPython.display import Markdown, Image, display
+report_dir = f'{RESULTS}/{MODE}/report'
+if os.path.exists(f'{report_dir}/REPORT.md'):
+    display(Markdown(open(f'{report_dir}/REPORT.md').read()))
+    for png in sorted(glob.glob(f'{report_dir}/*.png')):
+        display(Image(png, width=640))
+    print('All results, tables (CSV) and plots:', report_dir)
+```
 
 The cell mounts Google Drive, clones this repo, installs the dependencies (no numpy downgrade, so no runtime
 restart), downloads WILDTRACK from Kaggle and the official TrackTacular checkpoint, runs every experiment and
