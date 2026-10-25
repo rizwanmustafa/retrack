@@ -139,6 +139,9 @@ def train(variant, seed, data_dir, results, args):
            '--trainer.precision', args.precision,
            '--trainer.default_root_dir', run_dir,
            '--seed_everything', str(seed)] + shlex.split(args.train_args)
+    if not args.progress_bar:
+        # the live progress bar floods notebook output; one line per epoch is printed instead
+        cmd += ['--trainer.enable_progress_bar', 'false']
     previous = sorted(glob.glob(osp.join(run_dir, 'lightning_logs', '*', 'checkpoints', 'last.ckpt')),
                       key=osp.getmtime)
     if previous:
@@ -178,6 +181,7 @@ def main():
     p.add_argument('--official', action='store_true',
                    help='also evaluate the released TrackTacular checkpoint (known not to work, see issue #7)')
     p.add_argument('--train_args', default='', help='extra arguments for `world_track.py fit`')
+    p.add_argument('--progress_bar', action='store_true', help='show Lightning\'s live progress bar while training')
     args = p.parse_args()
 
     quick = args.mode == 'quick'

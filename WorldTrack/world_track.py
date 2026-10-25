@@ -1,5 +1,6 @@
 import os
 import os.path as osp
+import time
 from typing import List, Optional
 
 import torch
@@ -304,6 +305,17 @@ class WorldTrackModel(pl.LightningModule):
         total_loss = sum(loss_weight_dict.values()) + sum(stats_dict.values())
 
         return total_loss, loss_dict
+
+    def on_train_epoch_start(self):
+        self._epoch_start = time.time()
+
+    def on_train_epoch_end(self):
+        # one plain line per epoch, readable even with the progress bar disabled
+        m = self.trainer.callback_metrics
+        val = lambda k: f'{m[k].item():.3f}' if k in m else '-'
+        print(f'epoch {self.current_epoch + 1}/{self.trainer.max_epochs}  train_loss {val("train_loss")}  '
+              f'val_loss {val("val_loss")}  val_center {val("val_center")}  '
+              f'({time.time() - getattr(self, "_epoch_start", time.time()):.0f}s)', flush=True)
 
     def training_step(self, batch, batch_idx):
         item, target = batch
