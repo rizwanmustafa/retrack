@@ -199,7 +199,7 @@ def build_report(results):
 
     for grid, title in [('grid_S2', '3. Stage 2 grid — ByteTrack-style association parameters'),
                         ('grid_S3', '4. Stage 3 grid — re-ID weight λ and match threshold')]:
-        g = df[df.method == grid]
+        g = df[(df.method == grid) & (df.variant == 'concat')]  # grids belong to the trained baseline only
         if g.empty:
             continue
         g = g.assign(kgroup=np.where(g.k == 0, 'all cams', 'cams removed (k≥1)'))
@@ -220,32 +220,38 @@ def build_report(results):
     # ---------------- Stage 4 fusion ablation (retrained models)
     tr = df[df.variant.isin(VARIANTS)]
     if not tr.empty:
-        s0 = tr[tr.method == 'S0_baseline']
-        agg = aggregate(s0, ['variant', 'k'], ALL)
+        def ablation_table(method):
+            agg = aggregate(tr[tr.method == method], ['variant', 'k'], ALL)
+            rows = []
+            for v in VARIANTS:
+                t = agg[agg.variant == v].sort_values('k')
+                if t.empty:
+                    continue
+                row = {'fusion variant': VARIANT_NAMES[v], 'seeds': int(t['n_seeds'].max())}
+                for m in ['moda', 'mota']:
+                    for r in t.to_dict('records'):
+                        row[f"{m.upper()} k={r['k']}"] = fmt(r, m)
+                    row[f'{m.upper()} slope / cam'] = f"{slope(t['k'], t[m]):+.2f}"
+                rows.append(row)
+            cols = list(dict.fromkeys(c for r in rows for c in r))
+            return agg, md_table([{c: r.get(c, '') for c in cols} for r in rows], cols)
+
+        agg, table = ablation_table('S0_baseline')
         agg.to_csv(osp.join(out, 'stage4_fusion_ablation.csv'), index=False)
-        rows = []
-        for v in VARIANTS:
-            t = agg[agg.variant == v].sort_values('k')
-            if t.empty:
-                continue
-            row = {'fusion variant': VARIANT_NAMES[v], 'seeds': int(t['n_seeds'].max())}
-            for r in t.to_dict('records'):
-                row[f"MODA k={r['k']}"] = fmt(r, 'moda')
-            row['MODA slope / cam'] = f"{slope(t['k'], t['moda']):+.2f}"
-            for r in t.to_dict('records'):
-                row[f"MOTA k={r['k']}"] = fmt(r, 'mota')
-            row['MOTA slope / cam'] = f"{slope(t['k'], t['mota']):+.2f}"
-            rows.append(row)
-        cols = list(dict.fromkeys(c for r in rows for c in r))
-        rows = [{c: r.get(c, '') for c in cols} for r in rows]
         md += ['\n## 5. Stage 4 — robust view fusion ablation (retrained, threshold 0.5, TrackTacular tracker)\n',
                'Only the fusion changes between rows; detection threshold and tracker are fixed so the effect of '
-               'fusion is isolated. Slope = metric points lost per removed camera (linear fit).\n\n',
-               md_table(rows, cols)]
+               'fusion is isolated. Slope = metric points lost per removed camera (linear fit).\n\n', table]
         for m in ['moda', 'mota', 'idf1']:
             plot_curves(agg, m, f'Stage 4 fusion ablation: {m.upper()} vs removed cameras',
                         osp.join(out, f'stage4_{m}.png'), 'variant', VARIANTS)
         md += ['\n![moda](stage4_moda.png) ![mota](stage4_mota.png) ![idf1](stage4_idf1.png)\n']
+
+        agg_t, table = ablation_table('S1_threshold')
+        agg_t.to_csv(osp.join(out, 'stage4_fusion_ablation_tuned_threshold.csv'), index=False)
+        md += ['\n### 5b. Same ablation with each model\'s own tuned threshold (TrackTacular tracker)\n',
+               'A fixed threshold also measures how confident each model is, which differs between variants. Here '
+               'every model uses its own best-MODA threshold, so the comparison isolates detection quality.\n\n',
+               table]
 
         # all methods x all variants (full grid)
         full = aggregate(tr[tr.method.isin(METHOD_NAMES)], ['variant', 'method', 'k'], ALL)
