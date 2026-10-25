@@ -18,6 +18,7 @@ usage (from WorldTrack/):
     python -m evaluation.retrack_eval --ckpt model.ckpt --data_dir /content/data/Wildtrack --out results/eval/x
 """
 import argparse
+import inspect
 import itertools
 import json
 import os
@@ -51,7 +52,9 @@ S3_GRID = [dict(S2_DEFAULTS, use_reid=True, reid_lambda=lam, reid_thresh=th)
 def load_model(ckpt_path, device):
     from world_track import WorldTrackModel
     ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
-    hparams = dict(ckpt.get('hyper_parameters', {}))
+    # LightningCLI also stores entries such as `_instantiator` that are not constructor arguments
+    accepted = inspect.signature(WorldTrackModel.__init__).parameters
+    hparams = {k: v for k, v in ckpt.get('hyper_parameters', {}).items() if k in accepted}
     model = WorldTrackModel(**hparams)
     missing, unexpected = model.load_state_dict(ckpt['state_dict'], strict=False)
     assert not missing and not unexpected, f'checkpoint mismatch: missing={missing}, unexpected={unexpected}'
