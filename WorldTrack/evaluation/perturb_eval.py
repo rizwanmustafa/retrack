@@ -13,10 +13,11 @@ detection (MODA, recall, precision) and tracking (MOTA, IDF1, ID switches) with 
 threshold 0.5 (S0) and with the ByteTrack-style tracker (S2), and counts how often a fault is worse than simply
 dropping that camera.
 
---mode calib_sweep repeats the all-camera calibration error with several random draws per setting:
+--mode calib_sweep repeats the calibration error with several random draws per setting:
   fixed_angle       every camera rotated by exactly `angle` degrees about its own random axis
   roll_pitch_gauss  every camera gets Gaussian roll and pitch noise with standard deviation `sigma` degrees
                     (the extrinsic-perturbation protocol of BEVHeight-style robustness evaluations)
+  k_cameras         a random subset of k cameras rotated by 1 degree (k = 1..all), as in NCGR
 It also reports how far the error moves ground points (median, world units: cm on WILDTRACK).
 
     python -m evaluation.perturb_eval --results /content/drive/MyDrive/retrack_results/full \
@@ -42,6 +43,7 @@ ALL_CAM_ANGLES = (0.5, 1.0)
 LAGS = (1, 2)  # annotated frames (0.5 s each on WILDTRACK)
 SWEEP_ANGLES = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5)  # degrees, every camera
 SWEEP_SIGMAS = (0.25, 0.5, 0.75, 1.0)  # degrees, roll/pitch standard deviation
+K_CAMERAS_ANGLE = 1.0  # degrees, for the "how many cameras are miscalibrated" curve
 
 
 def rotation(axis, angle_deg):
@@ -71,6 +73,11 @@ def sweep_conditions(num_cams, draws, seed=0):
     for sigma in SWEEP_SIGMAS:
         conds += [('roll_pitch_gauss', sigma, d, {c: roll_pitch_noise(rng, sigma) for c in range(num_cams)})
                   for d in range(draws)]
+    # k of the cameras (random subset) rotated by K_CAMERAS_ANGLE, as in NCGR's 1..N-camera evaluation
+    for k in range(1, num_cams + 1):
+        for d in range(draws):
+            cams = sorted(rng.choice(num_cams, k, replace=False).tolist())
+            conds.append(('k_cameras', k, d, {c: rotation(rng.normal(size=3), K_CAMERAS_ANGLE) for c in cams}))
     return conds
 
 
@@ -147,12 +154,14 @@ def summarise_sweep(df):
     for variant, g in df.groupby('variant', sort=False):
         clean = g[g.protocol == 'clean'].iloc[0]
         lines.append(f'\n### {variant}  (clean: MODA {clean.moda:.1f}, MOTA {clean.S0_mota:.1f}, IDF1 {clean.S0_idf1:.1f})\n')
-        lines.append('| protocol | magnitude (°) | ground shift | MODA (mean ± std over draws) | ΔMODA | recall '
+        lines.append('| protocol | magnitude | ground shift | MODA (mean ± std over draws) | ΔMODA | recall '
                      '| precision | MOTA (S0) | IDF1 (S0) | MOTA (S2) | IDF1 (S2) |')
         lines.append('|---|---|---|---|---|---|---|---|---|---|---|')
         for (protocol, mag), h in g[g.protocol != 'clean'].groupby(['protocol', 'magnitude'], sort=False):
-            name = 'fixed angle, all cameras' if protocol == 'fixed_angle' else 'roll/pitch Gaussian σ, all cameras'
-            lines.append(f'| {name} | {mag:g} | {h.ground_shift.median():.0f} | {h.moda.mean():.1f} ± {h.moda.std():.1f} '
+            name, value = {'fixed_angle': ('fixed angle, all cameras', f'{mag:g}°'),
+                           'roll_pitch_gauss': ('roll/pitch Gaussian, all cameras', f'σ = {mag:g}°'),
+                           'k_cameras': (f'{K_CAMERAS_ANGLE:g}° on k cameras', f'k = {int(mag)}')}[protocol]
+            lines.append(f'| {name} | {value} | {h.ground_shift.median():.0f} | {h.moda.mean():.1f} ± {h.moda.std():.1f} '
                          f'| {h.moda.mean() - clean.moda:+.1f} | {h.recall.mean():.1f} | {h.precision.mean():.1f} '
                          f'| {h.S0_mota.mean():.1f} | {h.S0_idf1.mean():.1f} | {h.S2_mota.mean():.1f} '
                          f'| {h.S2_idf1.mean():.1f} |')
