@@ -161,8 +161,28 @@ IDF1 95.2, close to the paper's 92.1 / 91.8 / 95.3); a plausible reason is that 
 has 2–17 px of error, so tolerating small misalignment helps on clean data too. Once trained with calibration noise,
 masked fusion is no more robust than concatenation (1°: 67.7 vs 67.0) and is lower on clean data.
 
-Caveat: one seed. The robustness gains (+8 to +28 MODA) are far beyond noise; the +1.1 clean gain is not yet. A
-confirmation run with two more seeds of `concat` and `concat_calib` is next.
+**Trade-off: calibration-noise training makes the model worse with missing or frozen cameras.**
+
+| Condition (MODA) | `concat` | `concat_calib` | `masked_drop` | `masked_calib` |
+|---|---|---|---|---|
+| 1 camera removed (avg over 7) | 89.5 | 89.1 | 88.9 | 87.3 |
+| 2 cameras removed (avg over 21) | 87.2 | 85.6 | 86.2 | 83.3 |
+| 3 cameras removed (avg over 35) | 82.9 | **79.5** | 81.9 | **76.4** |
+| MODA lost per removed camera (slope) | −2.6 | −4.1 | −2.8 | −4.4 |
+| 1 camera frozen (ΔMODA) | −6.3 | **−10.1** | −6.5 | −7.1 |
+| 1 camera 1 frame late (ΔMODA) | −3.2 | −3.9 | −3.2 | −4.0 |
+| 1 camera rotated 1° (ΔMODA; worse than dropping it) | −2.3 (5/7) | **−1.4 (0/7)** | −1.2 (3/7) | −1.2 (1/7) |
+
+With 3 cameras removed `concat_calib` loses 3.4 MODA more than the baseline, and `masked_calib` 5.5 more than
+`masked_drop` even though it is also trained with camera dropout, so dropout does not prevent the trade-off. A
+possible explanation (not tested): learning to distrust misaligned views makes the model rely on agreement between
+many cameras, which hurts when fewer cameras remain. Options to reduce it: weaker noise (σ = 0.25° or a lower
+probability), or pairing the noise model with detection of dropped/frozen cameras (Approach 2) so that the
+remaining cameras are not misread.
+
+Caveat: one seed. The robustness gains (+8 to +28 MODA) are far beyond noise; the +1.1 clean gain and the
+missing-camera cost (−3.4 at k = 3) are not yet. A confirmation run with two more seeds of `concat` and
+`concat_calib` is next ([`CONFIRMATION_RUN.md`](CONFIRMATION_RUN.md)).
 
 ## Approach 2: Detect and drop the faulty camera
 

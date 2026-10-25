@@ -90,5 +90,10 @@ Calibration-noise training is **confirmed** if, averaged over the three seeds, `
 The clean-calibration **improvement** (+1.1 MODA with seed 1) counts as real only if it is larger than the spread
 between seeds. Otherwise report it as "no loss with clean calibration".
 
+Also check the **trade-off** seen with seed 1: `concat_calib` was worse with cameras removed (MODA with 3 cameras
+removed 79.5 vs 82.9; Stage 4 table in `REPORT.md`) and with a frozen camera (−10.1 vs −6.3 in `SUMMARY.md`). If
+this repeats over three seeds, report calibration-noise training as a trade-off: much more robust to calibration
+errors, less robust to missing or frozen cameras.
+
 After the run, paste `CALIB_SWEEP.md` (and the `concat` / `concat_calib` rows of `REPORT.md`'s Stage 4 table, which
 show the effect on missing cameras) for analysis.
