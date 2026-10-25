@@ -1,4 +1,8 @@
 from models.segnet import Segnet
 from models.mvdet import MVDet
 from models.liftnet import Liftnet
-from models.bevformernet import Bevformernet
+
+try:  # bevformernet needs mmcv, which is optional
+    from models.bevformernet import Bevformernet
+except ImportError:
+    Bevformernet = None

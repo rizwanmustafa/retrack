@@ -1,5 +1,9 @@
-import motmetrics as mm
 import numpy as np
+
+if not hasattr(np, 'asfarray'):  # removed in numpy 2 but still used by motmetrics 1.4
+    np.asfarray = lambda a, dtype=np.float64: np.asarray(a, dtype=dtype)
+
+import motmetrics as mm  # noqa: E402
 
 
 def mot_metrics(tSource, gtSource, scale=0.025):
