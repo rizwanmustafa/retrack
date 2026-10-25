@@ -1,0 +1,10 @@
+# Colab already ships torch, torchvision, numpy (2.x), scipy, pandas, matplotlib, opencv, timm and kagglehub.
+# Nothing here pins numpy, so no runtime restart is needed (motmetrics gets a numpy 2 shim in evaluation/mot_bev.py).
+kornia
+lightning[pytorch-extra]
+einops
+lap
+motmetrics
+efficientnet_pytorch
+timm
+kagglehub
