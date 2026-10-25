@@ -84,12 +84,15 @@ def reset_temporal_cache(model):
 
 
 @torch.no_grad()
-def run_inference(model, items, drop_cams=(), reid=None, reid_min_score=0.1):
-    """Runs the network on the test split with `drop_cams` switched off and decodes the BEV detections."""
+def run_inference(model, items, drop_cams=(), reid=None, reid_min_score=0.1, perturb=None):
+    """
+    Runs the network on the test split with `drop_cams` switched off and decodes the BEV detections.
+    perturb: optional callable(index, batch) that modifies a frame's inputs in place before the forward pass
+    """
     device = model.device
     reset_temporal_cache(model)
     frames = []
-    for item in items:
+    for index, item in enumerate(items):
         batch = {k: (v.to(device) if torch.is_tensor(v) else v) for k, v in item.items()}
         batch['img'] = batch['img'].float() / 255
         S = batch['img'].shape[1]
@@ -98,6 +101,8 @@ def run_inference(model, items, drop_cams=(), reid=None, reid_min_score=0.1):
             cam_mask = torch.ones(1, S, device=device)
             cam_mask[:, list(drop_cams)] = 0
             batch['cam_mask'] = cam_mask
+        if perturb is not None:
+            perturb(index, batch)
         output = model(batch)
 
         xy_e, xy_prev_e, scores_e, _, _, _ = decode.decoder(
