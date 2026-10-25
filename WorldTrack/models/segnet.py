@@ -7,6 +7,7 @@ import utils.basic
 
 from models.encoder import Encoder_res101, Encoder_res50, Encoder_res18, Encoder_eff, Encoder_swin_t
 from models.decoder import Decoder
+from models.fusion import FUSION_MODES, CameraScorer, fuse_views, coverage_map
 
 
 class Segnet(nn.Module):
@@ -19,9 +20,12 @@ class Segnet(nn.Module):
                  num_cameras=None,
                  z_sign=1,
                  encoder_type='swin_t',
-                 device=torch.device('cuda')):
+                 fusion='concat',
+                 coverage_map=False,
+                 fusion_hidden_dim=16):
         super(Segnet, self).__init__()
         assert (encoder_type in ['res101', 'res50', 'effb0', 'effb4', 'res18', 'vgg11', 'swin_t'])
+        assert fusion in FUSION_MODES
 
         self.Y, self.Z, self.X = Y, Z, X
         self.do_rgbcompress = do_rgbcompress
@@ -30,9 +34,11 @@ class Segnet(nn.Module):
         self.encoder_type = encoder_type
         self.z_sign = z_sign
         self.num_cameras = num_cameras
+        self.fusion = fusion
+        self.use_coverage = coverage_map
 
-        self.mean = torch.as_tensor([0.485, 0.456, 0.406], device=device).reshape(1, 3, 1, 1)
-        self.std = torch.as_tensor([0.229, 0.224, 0.225], device=device).reshape(1, 3, 1, 1)
+        self.register_buffer('mean', torch.as_tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1), persistent=False)
+        self.register_buffer('std', torch.as_tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1), persistent=False)
 
         # Encoder
         self.feat2d_dim = feat2d_dim
@@ -50,15 +56,18 @@ class Segnet(nn.Module):
             self.encoder = Encoder_eff(feat2d_dim, version='b4')
 
         # BEV compressor
-        if self.num_cameras is not None:
+        self.cam_compressor = None
+        if self.fusion == 'concat' and self.num_cameras is not None:
             self.cam_compressor = nn.Sequential(
                 nn.Conv3d(feat2d_dim * self.num_cameras, feat2d_dim, kernel_size=3, padding=1, stride=1),
                 nn.InstanceNorm3d(feat2d_dim), nn.ReLU(),
                 nn.Conv3d(feat2d_dim, feat2d_dim, kernel_size=1),
             )
+        if self.fusion == 'weighted':
+            self.cam_scorer = CameraScorer(feat2d_dim, fusion_hidden_dim, spatial_dims=3)
 
         self.bev_compressor = nn.Sequential(
-            nn.Conv2d(self.feat2d_dim * self.Z, latent_dim, kernel_size=3, padding=1),
+            nn.Conv2d(self.feat2d_dim * self.Z + int(self.use_coverage), latent_dim, kernel_size=3, padding=1),
             nn.InstanceNorm2d(latent_dim), nn.ReLU(),
             nn.Conv2d(latent_dim, latent_dim, kernel_size=1),
         )
@@ -83,7 +92,7 @@ class Segnet(nn.Module):
         self.size_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
         self.rot_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
 
-    def forward(self, rgb_cams, pix_T_cams, cams_T_global, vox_util, ref_T_global, prev_bev=None):
+    def forward(self, rgb_cams, pix_T_cams, cams_T_global, vox_util, ref_T_global, prev_bev=None, cam_mask=None):
         """
         B = batch size, S = number of cameras, C = 3, H = img height, W = img width
         rgb_cams: (B,S,C,H,W)
@@ -91,6 +100,7 @@ class Segnet(nn.Module):
         cams_T_global: (B,S,4,4)
         vox_util: vox util object
         ref_T_global: (B,4,4)
+        cam_mask: (B,S) 1 = camera working, 0 = camera switched off; None = all working
         rad_occ_mem0:
             - None when use_radar = False, use_lidar = False
             - (B, 1, Z, Y, X) when use_radar = True, use_metaradar = False
@@ -129,12 +139,13 @@ class Segnet(nn.Module):
         featpix_T_cams_ = utils.geom.scale_intrinsics(pix_T_cams_, sx, sy)
 
         # unproject image feature to 3d grid
-        feat_mems_ = vox_util.unproject_image_to_mem(
+        feat_mems_, valid_mems_ = vox_util.unproject_image_to_mem(
             feat_cams_,  # B*S,128,H/8,W/8
             utils.basic.matmul2(featpix_T_cams_, cams_T_ref_),  # featpix_T_ref  B*S,4,4
             cams_T_ref_, Y, Z, X,
-            xyz_refA=None, z_sign=self.z_sign)
-        feat_mems = __u(feat_mems_)  # B, S, C, Z, Y, X
+            xyz_refA=None, z_sign=self.z_sign, return_valid=True)
+        feat_mems = __u(feat_mems_)  # B, S, C, Y, Z, X
+        valid_mems = __u(valid_mems_)  # B, S, 1, Y, Z, X
 
         # rgb_cams_raw = rgb_cams_ * self.std.to(device) + self.mean.to(device)
         # rgb_mem_ = vox_util.unproject_image_to_mem(
@@ -149,20 +160,24 @@ class Segnet(nn.Module):
         # plt.imshow(rgb_mem[0, :, :, 0].permute(1, 2, 0).cpu())
         # plt.show()
 
-        if self.num_cameras is None:
-            mask_mems = (torch.abs(feat_mems) > 0).float()
-            feat_mem = utils.basic.reduce_masked_mean(feat_mems, mask_mems, dim=1)  # B, C, Z, Y, X
-        else:
-            feat_mem = self.cam_compressor(feat_mems.flatten(1, 2))
+        feat_mem, mask_mems = fuse_views(feat_mems, valid_mems, cam_mask, self.fusion,
+                                         cam_compressor=self.cam_compressor,
+                                         scorer=getattr(self, 'cam_scorer', None))  # B, C, Y, Z, X
+        coverage = coverage_map(mask_mems, height_dim=3) if self.use_coverage else None  # B, 1, Y, X
 
         if self.rand_flip:
             self.bev_flip1_index = np.random.choice([0, 1], B).astype(bool)
             self.bev_flip2_index = np.random.choice([0, 1], B).astype(bool)
             feat_mem[self.bev_flip1_index] = torch.flip(feat_mem[self.bev_flip1_index], [-1])
             feat_mem[self.bev_flip2_index] = torch.flip(feat_mem[self.bev_flip2_index], [-3])
+            if coverage is not None:
+                coverage[self.bev_flip1_index] = torch.flip(coverage[self.bev_flip1_index], [-1])
+                coverage[self.bev_flip2_index] = torch.flip(coverage[self.bev_flip2_index], [-2])
 
         # bev compressing
         feat_bev_ = feat_mem.permute(0, 1, 3, 2, 4).reshape(B, self.feat2d_dim * Z, Y, X)
+        if coverage is not None:
+            feat_bev_ = torch.cat([feat_bev_, coverage.to(feat_bev_.dtype)], dim=1)
         feat_bev = self.bev_compressor(feat_bev_)
 
         if prev_bev is None:
@@ -172,5 +187,7 @@ class Segnet(nn.Module):
 
         # bev decoder
         out_dict = self.decoder(feat_bev, feat_cams_)
+        if coverage is not None:
+            out_dict['coverage'] = coverage
 
         return out_dict

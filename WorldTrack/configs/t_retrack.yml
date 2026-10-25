@@ -1,0 +1,20 @@
+# Same schedule as t_fit.yml. Only last.ckpt is kept (written every epoch, so runs can resume) and that is the
+# checkpoint Retrack evaluates: on Wildtrack the validation frames are the test frames, so selecting the
+# "best" epoch by validation loss would be selection on the test set.
+seed_everything: 80085
+trainer:
+  accelerator: gpu
+  devices: 1
+  max_epochs: 30
+  accumulate_grad_batches: 8
+  gradient_clip_val: 0.5
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 5
+  callbacks:
+    - class_path: LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: ModelCheckpoint
+      init_args:
+        save_last: true
+        save_top_k: 0

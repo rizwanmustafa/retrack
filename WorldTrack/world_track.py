@@ -1,4 +1,7 @@
+import os
 import os.path as osp
+from typing import List, Optional
+
 import torch
 import lightning as pl
 import matplotlib.pyplot as plt
@@ -6,7 +9,7 @@ import numpy as np
 
 from models import Segnet, MVDet, Liftnet, Bevformernet
 from models.loss import FocalLoss, compute_rot_loss
-from tracking.multitracker import JDETracker
+from tracking.multitracker import build_tracker
 from utils import vox, basic, decode
 from evaluation.mod import modMetricsCalculator
 from evaluation.mot_bev import mot_metrics
@@ -29,6 +32,20 @@ class WorldTrackModel(pl.LightningModule):
             use_temporal_cache=True,
             z_sign=1,
             feat2d_dim=128,
+            # Retrack Stage 4: robust view fusion
+            fusion='concat',  # 'concat' (baseline) | 'masked' | 'weighted'
+            coverage_map=False,
+            fusion_hidden_dim=16,
+            cam_dropout_prob=0.0,  # probability that a training sample has cameras switched off
+            cam_dropout_max=3,  # at most this many cameras are switched off per sample
+            test_drop_cams: Optional[List[int]] = None,  # cameras switched off at test time
+            # Retrack Stages 2-3: tracker used by `test`
+            tracker='baseline',  # 'baseline' | 'byte'
+            track_buffer=5,
+            byte_low_thresh=0.1,
+            use_reid=False,
+            reid_lambda=0.98,
+            reid_thresh=0.6,
     ):
         super().__init__()
         self.model_name = model_name
@@ -55,23 +72,37 @@ class WorldTrackModel(pl.LightningModule):
         self.mota_gt_list, self.mota_pred_list = [], []
         self.mota_seq_gt_list, self.mota_seq_pred_list = [], []
         self.frame = 0
-        self.test_tracker = JDETracker(conf_thres=self.conf_threshold)
+        self.z_sign = z_sign
+        self.tracker_kwargs = dict(tracker=tracker, conf_thres=self.conf_threshold, track_buffer=track_buffer,
+                                   low_thres=byte_low_thresh, use_reid=use_reid, reid_lambda=reid_lambda,
+                                   reid_thresh=reid_thresh)
+        self.test_tracker = build_tracker(**self.tracker_kwargs)
+        self.reid_extractor = None
+
+        # Camera dropout
+        self.cam_dropout_prob = cam_dropout_prob
+        self.cam_dropout_max = cam_dropout_max
+        self.test_drop_cams = list(test_drop_cams) if test_drop_cams else []
 
         # Model
         num_cameras = None if num_cameras == 0 else num_cameras
+        fusion_kwargs = dict(fusion=fusion, coverage_map=coverage_map, fusion_hidden_dim=fusion_hidden_dim)
         if model_name == 'segnet':
             self.model = Segnet(self.Y, self.Z, self.X, num_cameras=num_cameras, feat2d_dim=feat2d_dim,
-                                encoder_type=self.encoder_name, num_classes=num_classes, z_sign=z_sign)
+                                encoder_type=self.encoder_name, num_classes=num_classes, z_sign=z_sign,
+                                **fusion_kwargs)
         elif model_name == 'liftnet':
             self.model = Liftnet(self.Y, self.Z, self.X, encoder_type=self.encoder_name, feat2d_dim=feat2d_dim,
                                  DMIN=self.DMIN, DMAX=self.DMAX, D=self.D, num_classes=num_classes, z_sign=z_sign,
-                                 num_cameras=num_cameras)
+                                 num_cameras=num_cameras, **fusion_kwargs)
         elif model_name == 'bevformer':
+            assert Bevformernet is not None, 'bevformer needs mmcv'
+            assert fusion == 'concat' and not coverage_map, 'robust fusion is not implemented for bevformer'
             self.model = Bevformernet(self.Y, self.Z, self.X, feat2d_dim=feat2d_dim,
                                       encoder_type=self.encoder_name, num_classes=num_classes, z_sign=z_sign)
         elif model_name == 'mvdet':
             self.model = MVDet(self.Y, self.Z, self.X, encoder_type=self.encoder_name,
-                               num_cameras=num_cameras, num_classes=num_classes)
+                               num_cameras=num_cameras, num_classes=num_classes, **fusion_kwargs)
         else:
             raise ValueError(f'Unknown model name {self.model_name}')
 
@@ -89,6 +120,8 @@ class WorldTrackModel(pl.LightningModule):
         vox_util: vox util object
         """
         prev_bev = self.load_cache(item['frame'].cpu())
+        cam_mask = self.get_cam_mask(item)
+        kwargs = {} if cam_mask is None else {'cam_mask': cam_mask}
 
         output = self.model(
             rgb_cams=item['img'],
@@ -97,12 +130,37 @@ class WorldTrackModel(pl.LightningModule):
             ref_T_global=item['ref_T_global'],
             vox_util=self.vox_util,
             prev_bev=prev_bev,
+            **kwargs,
         )
 
         if self.use_temporal_cache:
             self.store_cache(item['frame'].cpu(), output['bev_raw'].clone().detach())
 
         return output
+
+    def get_cam_mask(self, item):
+        """
+        B,S mask of working cameras, or None when all cameras work (keeps the baseline forward unchanged).
+        Training: camera-dropout augmentation. Otherwise: item['cam_mask'] if given, else test_drop_cams.
+        """
+        B, S = item['img'].shape[:2]
+        device = item['img'].device
+        if self.training:
+            if self.cam_dropout_prob <= 0:
+                return None
+            cam_mask = torch.ones(B, S, device=device)
+            for b in range(B):
+                if torch.rand(1).item() < self.cam_dropout_prob:
+                    k = int(torch.randint(1, min(self.cam_dropout_max, S - 1) + 1, (1,)).item())
+                    cam_mask[b, torch.randperm(S)[:k]] = 0
+            return cam_mask
+        if 'cam_mask' in item:
+            return item['cam_mask'].to(device)
+        if self.test_drop_cams:
+            cam_mask = torch.ones(B, S, device=device)
+            cam_mask[:, self.test_drop_cams] = 0
+            return cam_mask
+        return None
 
     def load_cache(self, frames):
         idx = []
@@ -281,7 +339,11 @@ class WorldTrackModel(pl.LightningModule):
                 zip(item['sequence_num'], item['frame'], item['grid_gt'], ref_xy.cpu(), ref_xy_prev.cpu(),
                     scores_e.cpu())):
             frame = int(frame.item())
-            output_stracks = self.test_tracker.update(bev_det, bev_prev, score)
+            if self.tracker_kwargs['use_reid']:
+                feats = self.reid_features(item, ref_xy[0], scores_e[0])
+                output_stracks = self.test_tracker.update(bev_det, bev_prev, score, feats=feats)
+            else:
+                output_stracks = self.test_tracker.update(bev_det, bev_prev, score)
 
             self.mota_gt_list.extend([[seq_num.item(), frame, i.item(), -1, -1, -1, -1, 1, x.item(),  y.item(), -1]
                                       for x, y, i in grid_gt[grid_gt.sum(1) != 0]])
@@ -289,8 +351,24 @@ class WorldTrackModel(pl.LightningModule):
                                         + s.xy.tolist() + [-1]
                                         for s in output_stracks])
 
+    def reid_features(self, item, ref_xy, scores):
+        """Appearance descriptors of the detections of the first sample in the batch from the working cameras."""
+        if self.reid_extractor is None:
+            from tracking.reid import BEVReIDExtractor
+            self.reid_extractor = BEVReIDExtractor(person_height=0.9 * (self.bounds[5] - self.bounds[4]),
+                                                   device=self.device, z_sign=self.z_sign)
+        cam_mask = self.get_cam_mask(item)
+        keep = scores >= self.tracker_kwargs['low_thres']
+        feats = np.full((len(scores), self.reid_extractor.model.feature_dim), np.nan, np.float32)
+        if keep.any():
+            feats[keep.cpu().numpy()] = self.reid_extractor(
+                item['img'][0], item['intrinsic'][0], item['extrinsic'][0], item['ref_T_global'][0],
+                ref_xy[keep], None if cam_mask is None else cam_mask[0])[0]
+        return feats
+
     def on_test_epoch_end(self):
         log_dir = self.trainer.log_dir if self.trainer.log_dir is not None else '../data/cache'
+        os.makedirs(log_dir, exist_ok=True)
 
         # detection
         pred_path = osp.join(log_dir, 'moda_pred.txt')
@@ -298,6 +376,8 @@ class WorldTrackModel(pl.LightningModule):
         np.savetxt(pred_path, np.array(self.moda_pred_list), '%f')
         np.savetxt(gt_path, np.array(self.moda_gt_list), '%d')
         recall, precision, moda, modp = modMetricsCalculator(osp.abspath(pred_path), osp.abspath(gt_path))
+        if self.test_drop_cams:
+            print(f'cameras switched off at test time: {self.test_drop_cams}')
         self.log(f'detect/recall', recall)
         self.log(f'detect/precision', precision)
         self.log(f'detect/moda', moda)
@@ -323,7 +403,9 @@ class WorldTrackModel(pl.LightningModule):
         center_g = target['center_bev']
 
         # save plots to tensorboard in eval loop
-        writer = self.logger.experiment
+        writer = getattr(self.logger, 'experiment', None) if self.logger is not None else None
+        if not hasattr(writer, 'add_figure'):
+            return
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 8))
         ax1.imshow(center_g[-1].amax(0).sigmoid().squeeze().cpu().numpy())
         ax2.imshow(center_e[-1].amax(0).sigmoid().squeeze().cpu().numpy())

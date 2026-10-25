@@ -295,13 +295,14 @@ class VoxelUtil:
         return feat_voxels
 
     def unproject_image_to_mem(self, rgb_camB, pixB_T_refA, camB_T_refA, Y, Z, X, assert_cube=False, xyz_refA=None,
-                               z_sign=1, mode='bilinear'):
+                               z_sign=1, mode='bilinear', return_valid=False):
         """
         rgb_camB: B*S x 128 x H x W
         pixB_T_refA: B*S x 4 x 4
         camB_T_refA: B*S x 4 x 4
         rgb lives in B pixel coords we want everything in A ref coords
         this puts each C-dim pixel in the rgb_camB along a ray in the voxel grid
+        return_valid: also return the B*S x 1 x Y x Z x X field-of-view mask of each camera
         """
         B, C, H, W = rgb_camB.shape
 
@@ -336,9 +337,12 @@ class VoxelUtil:
 
         values = torch.reshape(values, (B, C, Y, Z, X))
         values = values * valid_mem
+        if return_valid:
+            return values, valid_mem
         return values
 
-    def warp_tiled_to_mem(self, rgb_tileB, pixB_T_ref, camB_T_ref, Y, Z, X, DMIN, DMAX, assert_cube=False, z_sign=1):
+    def warp_tiled_to_mem(self, rgb_tileB, pixB_T_ref, camB_T_ref, Y, Z, X, DMIN, DMAX, assert_cube=False, z_sign=1,
+                          return_valid=False):
         """
         B = batch size, S = number of cameras, C = latent dim, D = depth, H = img height, W = img width
         rgb_tileB: B*S,C,D,H/8,W/8
@@ -388,4 +392,6 @@ class VoxelUtil:
 
         values = torch.reshape(values, (B, C, Y, Z, X))
         values = values * valid_mem
+        if return_valid:
+            return values, valid_mem
         return values

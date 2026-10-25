@@ -1,0 +1,5 @@
+# Stage 4 ablation (1/5): TrackTacular baseline, concatenation fusion, no camera dropout
+model:
+  fusion: concat
+  coverage_map: false
+  cam_dropout_prob: 0.0

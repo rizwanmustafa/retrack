@@ -6,6 +6,7 @@ import utils.basic
 import utils.geom
 import utils.vox
 from models.decoder import Decoder
+from models.fusion import FUSION_MODES, CameraScorer, fuse_views, coverage_map
 from models.encoder import Encoder_res101, Encoder_res50, Encoder_eff, Encoder_swin_t, Encoder_res18
 
 
@@ -22,9 +23,13 @@ class Liftnet(nn.Module):
                  feat2d_dim=96,
                  encoder_type='swin_t',
                  z_sign=1,
+                 fusion='concat',
+                 coverage_map=False,
+                 fusion_hidden_dim=16,
                  ):
         super(Liftnet, self).__init__()
         assert (encoder_type in ['res101', 'res50', 'res18', 'effb0', 'effb4', 'swin_t'])
+        assert fusion in FUSION_MODES
 
         self.Y, self.Z, self.X = Y, Z, X
         self.DMAX, self.DMIN = DMAX, DMIN
@@ -35,9 +40,11 @@ class Liftnet(nn.Module):
         self.encoder_type = encoder_type
         self.num_cameras = num_cameras
         self.z_sign = z_sign
+        self.fusion = fusion
+        self.use_coverage = coverage_map
 
-        self.mean = torch.as_tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1).float().cuda()
-        self.std = torch.as_tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1).float().cuda()
+        self.register_buffer('mean', torch.as_tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1), persistent=False)
+        self.register_buffer('std', torch.as_tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1), persistent=False)
 
         # Encoder
         self.feat2d_dim = feat2d_dim
@@ -56,15 +63,18 @@ class Liftnet(nn.Module):
             self.encoder = Encoder_eff(feat2d_dim + self.D, version='b4')
 
         # BEV compressor
-        if self.num_cameras is not None:
+        self.cam_compressor = None
+        if self.fusion == 'concat' and self.num_cameras is not None:
             self.cam_compressor = nn.Sequential(
                 nn.Conv3d(feat2d_dim * self.num_cameras, feat2d_dim, kernel_size=3, padding=1, stride=1),
                 nn.InstanceNorm3d(feat2d_dim), nn.ReLU(),
                 nn.Conv3d(feat2d_dim, feat2d_dim, kernel_size=1),
             )
+        if self.fusion == 'weighted':
+            self.cam_scorer = CameraScorer(feat2d_dim, fusion_hidden_dim, spatial_dims=3)
 
         self.bev_compressor = nn.Sequential(
-            nn.Conv2d(self.feat2d_dim * self.Z, latent_dim, kernel_size=3, padding=1),
+            nn.Conv2d(self.feat2d_dim * self.Z + int(self.use_coverage), latent_dim, kernel_size=3, padding=1),
             nn.InstanceNorm2d(latent_dim), nn.ReLU(),
             nn.Conv2d(latent_dim, latent_dim, kernel_size=1),
         )
@@ -124,7 +134,7 @@ class Liftnet(nn.Module):
 
         return points
 
-    def forward(self, rgb_cams, pix_T_cams, cams_T_global, vox_util, ref_T_global, prev_bev=None):
+    def forward(self, rgb_cams, pix_T_cams, cams_T_global, vox_util, ref_T_global, prev_bev=None, cam_mask=None):
         """
         B = batch size, S = number of cameras, C = 3, H = img height, W = img width
         rgb_cams: (B,S,C,H,W)
@@ -132,6 +142,7 @@ class Liftnet(nn.Module):
         cams_T_global: (B,S,4,4)
         vox_util: vox util object
         ref_T_global: (B,4,4)
+        cam_mask: (B,S) 1 = camera working, 0 = camera switched off; None = all working
         """
         B, S, C, H, W = rgb_cams.shape
         assert (C == 3)
@@ -170,32 +181,45 @@ class Liftnet(nn.Module):
         feat_tileXs_ = feat_cams_ * depth_cams_  # BS,C,D,Hf,Wf
 
         # unproject image feature to 3d grid
-        feat_mems_ = vox_util.warp_tiled_to_mem(
+        feat_mems_, valid_mems_ = vox_util.warp_tiled_to_mem(
             feat_tileXs_,
             utils.basic.matmul2(featpix_T_cams_, cams_T_ref_),  # featpix_T_ref
-            cams_T_ref_, Y, Z, X, self.DMIN, self.DMAX+self.DMIN, z_sign=self.z_sign)
+            cams_T_ref_, Y, Z, X, self.DMIN, self.DMAX+self.DMIN, z_sign=self.z_sign, return_valid=True)
         feat_mems = __u(feat_mems_)
+        valid_mems = __u(valid_mems_)  # B, S, 1, Y, Z, X
 
-        if self.num_cameras is None:
+        if self.fusion == 'concat' and self.cam_compressor is None:
+            # original num_cameras=None behaviour
             one_mems_ = vox_util.warp_tiled_to_mem(
                 torch.ones_like(feat_tileXs_),
                 utils.basic.matmul2(featpix_T_cams_, cams_T_ref_),
                 cams_T_ref_, Y, Z, X, self.DMIN, self.DMAX+self.DMIN, z_sign=self.z_sign)
             one_mems = __u(one_mems_)
             one_mems = one_mems.clamp(min=1.0)
-
+            if cam_mask is not None:
+                feat_mems = feat_mems * cam_mask.to(feat_mems.dtype).view(B, S, 1, 1, 1, 1)
             feat_mem = utils.basic.reduce_masked_mean(feat_mems, one_mems, dim=1)  # B, C, Y, Z, X
+            mask_mems = valid_mems if cam_mask is None else \
+                valid_mems * cam_mask.to(valid_mems.dtype).view(B, S, 1, 1, 1, 1)
         else:
-            feat_mem = self.cam_compressor(feat_mems.flatten(1, 2))
+            feat_mem, mask_mems = fuse_views(feat_mems, valid_mems, cam_mask, self.fusion,
+                                             cam_compressor=self.cam_compressor,
+                                             scorer=getattr(self, 'cam_scorer', None))  # B, C, Y, Z, X
+        coverage = coverage_map(mask_mems, height_dim=3) if self.use_coverage else None  # B, 1, Y, X
 
         if self.rand_flip:
             self.bev_flip1_index = np.random.choice([0, 1], B).astype(bool)
             self.bev_flip2_index = np.random.choice([0, 1], B).astype(bool)
             feat_mem[self.bev_flip1_index] = torch.flip(feat_mem[self.bev_flip1_index], [-1])
             feat_mem[self.bev_flip2_index] = torch.flip(feat_mem[self.bev_flip2_index], [-3])
+            if coverage is not None:
+                coverage[self.bev_flip1_index] = torch.flip(coverage[self.bev_flip1_index], [-1])
+                coverage[self.bev_flip2_index] = torch.flip(coverage[self.bev_flip2_index], [-2])
 
         # bev compressing
         bev_features = feat_mem.permute(0, 1, 3, 2, 4).flatten(1, 2)
+        if coverage is not None:
+            bev_features = torch.cat([bev_features, coverage.to(bev_features.dtype)], dim=1)
         bev_features = self.bev_compressor(bev_features)
 
         if prev_bev is None:
@@ -207,5 +231,7 @@ class Liftnet(nn.Module):
         out_dict = self.decoder(bev_features, feat_cams_.squeeze(2),
                                 (self.bev_flip1_index, self.bev_flip2_index) if self.rand_flip else None)
         out_dict['depth'] = depth_cams_out
+        if coverage is not None:
+            out_dict['coverage'] = coverage
 
         return out_dict
