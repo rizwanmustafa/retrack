@@ -61,7 +61,7 @@ class BaseTrack(object):
 class STrack(BaseTrack):
     shared_kalman = KalmanFilter()
 
-    def __init__(self, xy, xy_prev, score, buffer_size=30):
+    def __init__(self, xy, xy_prev, score, buffer_size=30, feat=None):
 
         # wait activate
         self._xy = xy
@@ -74,11 +74,14 @@ class STrack(BaseTrack):
         self.tracklet_len = 0
 
         self.smooth_feat = None
-        # self.update_features(temp_feat)
+        self.curr_feat = None
         self.features = deque([], maxlen=buffer_size)
         self.alpha = 0.9
+        if feat is not None:
+            self.update_features(feat)
 
     def update_features(self, feat):
+        feat = np.array(feat, dtype=np.float32)
         feat /= np.linalg.norm(feat)
         self.curr_feat = feat
         if self.smooth_feat is None:
@@ -320,3 +323,159 @@ def remove_duplicate_stracks(stracksa, stracksb):
     resa = [t for i, t in enumerate(stracksa) if not i in dupa]
     resb = [t for i, t in enumerate(stracksb) if not i in dupb]
     return resa, resb
+
+
+class ByteBEVTracker(JDETracker):
+    """
+    Retrack Stage 2: ByteTrack-style association on BEV points (+ Stage 3: optional appearance cost).
+
+    Pass 1: high-confidence detections (score >= conf_thres) are matched to all tracks (tracked + lost).
+            Cost = ground-plane distance between the track's predicted position and the detection's learned
+            previous-frame position (as in the baseline). With re-ID it becomes
+            D = lambda * D_app + (1 - lambda) * D_motion / gate, restricted to pairs inside the motion gate.
+    Pass 2: low-confidence detections (low_thres <= score < conf_thres) are matched, motion only, to the tracks
+            left unmatched. They can continue a track but never start one; unmatched ones are dropped.
+    New tracks are started only from unmatched high-confidence detections. Lost tracks are kept for
+    `track_buffer` frames.
+    """
+
+    def __init__(self, conf_thres=0.5, low_thres=0.1, track_buffer=10, match_thresh=75., low_match_thresh=50.,
+                 unconfirmed_thresh=100., use_reid=False, reid_lambda=0.98, reid_thresh=0.6, lost_gate_growth=0.0):
+        super().__init__(conf_thres=conf_thres, track_buffer=track_buffer)
+        self.low_thresh = low_thres
+        self.match_thresh = match_thresh
+        self.low_match_thresh = low_match_thresh
+        self.unconfirmed_thresh = unconfirmed_thresh
+        self.use_reid = use_reid
+        self.reid_lambda = reid_lambda
+        self.reid_thresh = reid_thresh
+        self.lost_gate_growth = lost_gate_growth
+
+    def first_pass_cost(self, tracks, detections):
+        motion = matching.center_distance([t.xy for t in tracks], [d.xy_prev for d in detections])
+        if not self.use_reid or motion.size == 0:
+            return motion, self.match_thresh
+
+        # motion gate, optionally widened for tracks that have been lost for a while
+        frames_lost = np.array([max(self.frame_id - t.end_frame - 1, 0) for t in tracks], dtype=np.float64)
+        gate = self.match_thresh * (1 + self.lost_gate_growth * frames_lost)[:, None]
+        motion_norm = motion / gate
+
+        app = motion_norm.copy()  # fall back to motion where a descriptor is missing
+        t_ok = np.array([t.smooth_feat is not None for t in tracks])
+        d_ok = np.array([d.curr_feat is not None for d in detections])
+        if t_ok.any() and d_ok.any():
+            t_feat = np.stack([t.smooth_feat for t in tracks if t.smooth_feat is not None])
+            d_feat = np.stack([d.curr_feat for d in detections if d.curr_feat is not None])
+            cos = np.maximum(0.0, 1.0 - t_feat @ d_feat.T)
+            app[np.ix_(t_ok, d_ok)] = cos
+
+        cost = self.reid_lambda * app + (1 - self.reid_lambda) * motion_norm
+        cost[motion_norm > 1] = 1e5
+        return cost, self.reid_thresh
+
+    def update(self, dets, dets_prev, score, feats=None):
+        self.frame_id += 1
+        activated_starcks = []
+        refind_stracks = []
+        lost_stracks = []
+        removed_stracks = []
+
+        dets, dets_prev, score = np.asarray(dets), np.asarray(dets_prev), np.asarray(score)
+        if feats is None:
+            feats = [None] * len(dets)
+        keep = np.where(score >= self.low_thresh)[0]
+        detections = []
+        for i in keep:
+            feat = feats[i]
+            if feat is not None and not np.all(np.isfinite(feat)):
+                feat = None
+            detections.append(STrack(dets[i], dets_prev[i], score[i], self.max_time_lost, feat=feat))
+        dets_high = [d for d in detections if d.score >= self.det_thresh]
+        dets_low = [d for d in detections if d.score < self.det_thresh]
+
+        unconfirmed = []
+        tracked_stracks: List[STrack] = []
+        for track in self.tracked_stracks:
+            if not track.is_activated:
+                unconfirmed.append(track)
+            else:
+                tracked_stracks.append(track)
+
+        def apply_match(track, det):
+            if track.state == TrackState.Tracked:
+                track.update(det, self.frame_id)
+                activated_starcks.append(track)
+            else:
+                track.re_activate(det, self.frame_id, new_id=False)
+                refind_stracks.append(track)
+            if det.curr_feat is not None:
+                track.update_features(det.curr_feat)
+
+        ''' Pass 1: high-confidence detections vs all tracks'''
+        strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)
+        STrack.multi_predict(strack_pool)
+        dists, thresh = self.first_pass_cost(strack_pool, dets_high)
+        matches, u_track, u_detection = matching.linear_assignment(dists, thresh=thresh)
+        for itracked, idet in matches:
+            apply_match(strack_pool[itracked], dets_high[idet])
+
+        ''' Pass 2: low-confidence detections vs the remaining tracks (motion only)'''
+        r_stracks = [strack_pool[i] for i in u_track]
+        dists = matching.center_distance([t.xy for t in r_stracks], [d.xy_prev for d in dets_low])
+        matches, u_track, _ = matching.linear_assignment(dists, thresh=self.low_match_thresh)
+        for itracked, idet in matches:
+            apply_match(r_stracks[itracked], dets_low[idet])
+
+        for it in u_track:
+            track = r_stracks[it]
+            if not track.state == TrackState.Lost:
+                track.mark_lost()
+                lost_stracks.append(track)
+
+        '''Unconfirmed tracks (one beginning frame) vs remaining high-confidence detections'''
+        detections = [dets_high[i] for i in u_detection]
+        dists = matching.center_distance([t.xy for t in unconfirmed], [d.xy_prev for d in detections])
+        matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=self.unconfirmed_thresh)
+        for itracked, idet in matches:
+            unconfirmed[itracked].update(detections[idet], self.frame_id)
+            if detections[idet].curr_feat is not None:
+                unconfirmed[itracked].update_features(detections[idet].curr_feat)
+            activated_starcks.append(unconfirmed[itracked])
+        for it in u_unconfirmed:
+            track = unconfirmed[it]
+            track.mark_removed()
+            removed_stracks.append(track)
+
+        """ Init new stracks from high-confidence detections only"""
+        for inew in u_detection:
+            track = detections[inew]
+            track.activate(self.kalman_filter, self.frame_id)
+            activated_starcks.append(track)
+
+        for track in self.lost_stracks:
+            if self.frame_id - track.end_frame > self.max_time_lost:
+                track.mark_removed()
+                removed_stracks.append(track)
+
+        self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
+        self.tracked_stracks = joint_stracks(self.tracked_stracks, activated_starcks)
+        self.tracked_stracks = joint_stracks(self.tracked_stracks, refind_stracks)
+        self.lost_stracks = sub_stracks(self.lost_stracks, self.tracked_stracks)
+        self.lost_stracks.extend(lost_stracks)
+        self.lost_stracks = sub_stracks(self.lost_stracks, self.removed_stracks)
+        self.removed_stracks.extend(removed_stracks)
+        self.tracked_stracks, self.lost_stracks = remove_duplicate_stracks(self.tracked_stracks, self.lost_stracks)
+
+        return [track for track in self.tracked_stracks if track.is_activated]
+
+
+def build_tracker(tracker='baseline', conf_thres=0.5, track_buffer=5, low_thres=0.1, low_match_thresh=50.,
+                  use_reid=False, reid_lambda=0.98, reid_thresh=0.6, lost_gate_growth=0.0):
+    if tracker == 'baseline':
+        return JDETracker(conf_thres=conf_thres, track_buffer=track_buffer)
+    if tracker == 'byte':
+        return ByteBEVTracker(conf_thres=conf_thres, low_thres=low_thres, track_buffer=track_buffer,
+                              low_match_thresh=low_match_thresh, use_reid=use_reid, reid_lambda=reid_lambda,
+                              reid_thresh=reid_thresh, lost_gate_growth=lost_gate_growth)
+    raise ValueError(f'Unknown tracker {tracker}')
