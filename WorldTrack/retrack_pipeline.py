@@ -2,11 +2,12 @@
 Retrack end-to-end pipeline: TrackTacular baseline vs Retrack on WILDTRACK.
 
   1. prepares WILDTRACK (Kaggle mirror) under --data_root
-  2. downloads the official TrackTacular checkpoint and checks that the Retrack evaluation engine reproduces
-     TrackTacular's own `test` numbers on it
-  3. evaluates Stages 1-3 (threshold, ByteTrack-style association, re-ID) on that checkpoint without retraining,
-     with all cameras and with cameras removed, including the parameter grids
-  4. trains the five Stage 4 fusion variants x seeds with the baseline schedule and evaluates each one
+  2. trains the TrackTacular baseline (concatenation fusion, first seed) and checks that the Retrack evaluation
+     engine reproduces TrackTacular's own `test` numbers on it. The released WILDTRACK checkpoints do not work
+     with the public code (TrackTacular issues #2 and #7: MODA ~0), so the baseline is retrained.
+  3. evaluates Stages 1-3 (threshold, ByteTrack-style association, re-ID) on the trained baseline without
+     retraining, with all cameras and with cameras removed, including the parameter grids
+  4. trains the other Stage 4 fusion variants x seeds with the baseline schedule and evaluates each one
   5. writes the comparison report (results/report/REPORT.md + CSVs + plots)
 
 Everything is written under --results (e.g. Google Drive) and every step is skipped if its output already
@@ -91,14 +92,15 @@ def official_checkpoint(model, results):
 
 
 # ------------------------------------------------------------------ steps
-def sanity_check(ckpt, data_dir, results):
+def sanity_check(ckpt, data_dir, results, tag):
     path = osp.join(results, 'sanity_lightning_test.json')
-    if osp.exists(path):
+    if osp.exists(path) and json.load(open(path)).get('tag') == tag:
         return
-    log('Sanity check: TrackTacular\'s own Lightning test on the official checkpoint')
+    log(f'Sanity check: TrackTacular\'s own Lightning test on {tag}')
     code = ('import json, sys, torch; torch.set_float32_matmul_precision("medium"); '
             'from evaluation.retrack_eval import lightning_test; '
             f'res = lightning_test({ckpt!r}, {data_dir!r}, {osp.join(results, "logs")!r}); '
+            f'res["tag"] = {tag!r}; '
             f'json.dump(res, open({path!r}, "w"), indent=1); print(res)')
     run([sys.executable, '-c', code])
 
@@ -171,7 +173,8 @@ def main():
     p.add_argument('--precision', default='32-true', help="'32-true' as the original; 'bf16-mixed' is faster")
     p.add_argument('--max_drop', type=int, default=None, help='evaluate up to this many removed cameras')
     p.add_argument('--max_combos', type=int, default=None, help='sample at most this many combinations per k')
-    p.add_argument('--skip_training', action='store_true', help='only Stages 1-3 on the official checkpoint')
+    p.add_argument('--official', action='store_true',
+                   help='also evaluate the released TrackTacular checkpoint (known not to work, see issue #7)')
     p.add_argument('--train_args', default='', help='extra arguments for `world_track.py fit`')
     args = p.parse_args()
 
@@ -190,18 +193,24 @@ def main():
     log('Data')
     data_dir = prepare_wildtrack(args.data_root)
 
-    log('Official TrackTacular checkpoint (baseline for Stages 1-3)')
-    official = official_checkpoint(args.model, args.results)
-    print(official)
-    sanity_check(official, data_dir, args.results)
-    evaluate(official, data_dir, args.results, 'official', 'official', -1, args, grids=True)
+    if args.official:
+        log('Released TrackTacular checkpoint (reference only)')
+        official = official_checkpoint(args.model, args.results)
+        evaluate(official, data_dir, args.results, 'official', 'official', -1, args)
 
-    if not args.skip_training:
-        # one full seed of every variant first, so a complete comparison exists as early as possible
-        for seed in seeds:
-            for variant in args.variants:
-                ckpt = train(variant, seed, data_dir, args.results, args)
-                evaluate(ckpt, data_dir, args.results, f'{variant}_s{seed}', variant, seed, args)
+    # The first model trained (the concat baseline, first seed) is the trained TrackTacular model that
+    # Stages 1-3 are applied to: it gets the sanity check and the parameter grids.
+    # One full seed of every variant runs first, so a complete comparison exists as early as possible.
+    variants = ['concat'] + [v for v in args.variants if v != 'concat'] if 'concat' in args.variants \
+        else args.variants
+    for seed in seeds:
+        for variant in variants:
+            ckpt = train(variant, seed, data_dir, args.results, args)
+            tag = f'{variant}_s{seed}'
+            primary = seed == seeds[0] and variant == variants[0]
+            if primary:
+                sanity_check(ckpt, data_dir, args.results, tag)
+            evaluate(ckpt, data_dir, args.results, tag, variant, seed, args, grids=primary)
 
     log('Report')
     subprocess.run([sys.executable, '-m', 'evaluation.retrack_report', '--results', args.results], cwd=HERE,

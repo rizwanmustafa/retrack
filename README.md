@@ -55,8 +55,8 @@ if os.path.exists(f'{report_dir}/REPORT.md'):
 ```
 
 The cell mounts Google Drive, clones this repo, installs the dependencies (no numpy downgrade, so no runtime
-restart), downloads WILDTRACK from Kaggle and the official TrackTacular checkpoint, runs every experiment and
-displays the report. All outputs go to `MyDrive/retrack_results/<mode>/`. Each step is skipped when its output
+restart), downloads WILDTRACK from Kaggle, trains the TrackTacular baseline and the Retrack variants, runs every
+experiment and displays the report. All outputs go to `MyDrive/retrack_results/<mode>/`. Each step is skipped when its output
 already exists and interrupted training resumes from `last.ckpt`, so **if Colab disconnects, run the cell
 again**.
 
@@ -71,7 +71,7 @@ Optional Colab Secrets: `KAGGLE_USERNAME`/`KAGGLE_KEY` (if the anonymous Kaggle 
 
 ### Outputs (`<results>/<mode>/`)
 - `report/REPORT.md`: all tables (also as CSV) and plots:
-  0. sanity check: the evaluation engine reproduces TrackTacular's own `test` numbers on the official checkpoint
+  0. sanity check: the evaluation engine reproduces TrackTacular's own `test` numbers on the trained baseline
   1. Stage 1 threshold sweep (recall / precision / MODA / MODP / MOTA / IDF1 per threshold)
   2. Stages 1–3 applied to the trained TrackTacular model, by number of removed cameras
   3. Stage 2 parameter grid (low threshold × track buffer)
@@ -79,7 +79,7 @@ Optional Colab Secrets: `KAGGLE_USERNAME`/`KAGGLE_KEY` (if the anonymous Kaggle 
   5. Stage 4 fusion ablation (5 variants, mean ± std over seeds, spread over camera combinations, slope per removed camera)
   6. final comparison: TrackTacular baseline vs full Retrack, with raw counts of misses, false positives, ID switches and fragmentations
 - `eval/<model>/metrics.csv`: every metric for every model × removed-camera combination × configuration
-- `runs/`: training logs and checkpoints, `model_zoo/`: the official checkpoint
+- `runs/`: training logs and checkpoints (`model_zoo/`: the released checkpoint, only with `--official`)
 
 ## What is implemented, and where
 
@@ -109,8 +109,14 @@ original TrackTacular, and the released checkpoints load unchanged.
   would be selection on the test set.
 - **Tuned threshold:** chosen as the best MODA on the test frames for lack of a validation split. The report says so
   and shows the full sweep. The Stage 2 and 3 parameters are fixed in advance, and the grids are reported separately.
-- **Stage 1–3 baseline:** the official released TrackTacular checkpoint. The Stage 4 / final baseline is the
-  retrained concatenation model, trained with the same schedule and seeds as the Retrack variants.
+- **Baseline = retrained TrackTacular.** The released WILDTRACK checkpoints do not work with the public code and
+  data: they give MODA ≈ 0 in TrackTacular's own `test` (identical numbers are reported in TrackTacular issues
+  [#2](https://github.com/tteepe/TrackTacular/issues/2) and [#7](https://github.com/tteepe/TrackTacular/issues/7)).
+  The calibration and the matmul precision were checked with `python -m evaluation.diagnose` and are not the cause.
+  The baseline is therefore the concatenation model trained with the original schedule. Stages 1–3 are applied to
+  it without retraining (the parameter grids and the sanity check use its first seed), and it is the baseline of
+  the Stage 4 ablation and of the final comparison. `--official` also evaluates the released checkpoint, for
+  reference only.
 - The detection evaluation also counts frames in which nothing is detected; the original code skipped them. This
   only matters with many cameras removed.
 - Compatibility fixes for current Colab (torch ≥ 2.2 sampler, mmcv optional, missing datamodule imports, numpy 2

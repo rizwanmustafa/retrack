@@ -38,6 +38,7 @@ MARKERS = ['o', 's', '^', 'D', 'v', 'P']
 DET = ['moda', 'modp', 'precision', 'recall']
 TRK = ['mota', 'idf1', 'mt', 'ml', 'id_switches', 'fragmentations']
 COUNTS = ['det_fn', 'det_fp', 'trk_misses', 'trk_fp', 'id_switches', 'fragmentations']
+ALL = list(dict.fromkeys(DET + TRK + COUNTS))
 
 
 def load(results):
@@ -141,38 +142,44 @@ def build_report(results):
 
     # ---------------- sanity check
     sanity_path = osp.join(results, 'sanity_lightning_test.json')
-    off = df[df.variant == 'official']
-    if osp.exists(sanity_path) and not off.empty:
+    if osp.exists(sanity_path):
         lt = json.load(open(sanity_path))
-        s0 = off[(off.method == 'S0_baseline') & (off.k == 0)].iloc[0]
-        rows = [{'metric': name, 'Lightning test (original code path)': f'{lt.get(key, float("nan")):.2f}',
-                 'retrack_eval S0': f'{s0[col]:.2f}'}
-                for name, key, col in [('MODA', 'detect/moda', 'moda'), ('MODP', 'detect/modp', 'modp'),
-                                       ('Recall', 'detect/recall', 'recall'), ('MOTA', 'track/mota', 'mota'),
-                                       ('IDF1', 'track/idf1', 'idf1')]]
-        md += ['\n## 0. Sanity check: the evaluation engine reproduces TrackTacular\'s own test\n',
-               md_table(rows, list(rows[0].keys()))]
+        ref = df[(df.tag == lt.get('tag')) & (df.method == 'S0_baseline') & (df.k == 0)]
+        if not ref.empty:
+            s0 = ref.iloc[0]
+            rows = [{'metric': name, 'Lightning test (original code path)': f'{lt.get(key, float("nan")):.2f}',
+                     'retrack_eval S0': f'{s0[col]:.2f}'}
+                    for name, key, col in [('MODA', 'detect/moda', 'moda'), ('MODP', 'detect/modp', 'modp'),
+                                           ('Recall', 'detect/recall', 'recall'), ('MOTA', 'track/mota', 'mota'),
+                                           ('IDF1', 'track/idf1', 'idf1')]]
+            md += [f'\n## 0. Sanity check: the evaluation engine reproduces TrackTacular\'s own test ({lt["tag"]})\n',
+                   md_table(rows, list(rows[0].keys()))]
 
-    # ---------------- Stage 1-3 on the official checkpoint
-    if not off.empty:
-        info = glob.glob(osp.join(results, 'eval', 'official', 'info.json'))
-        tuned = json.load(open(info[0]))['tuned_thr'] if info else None
-        sweep = off[(off.method == 'sweep') & (off.k == 0)].sort_values('thr')
+    # ---------------- Stages 1-3 on the trained TrackTacular baseline (concat), averaged over seeds
+    base = df[df.variant == 'concat']
+    if not base.empty:
+        tuned = {}
+        for tag in sorted(base.tag.unique()):
+            info = osp.join(results, 'eval', tag, 'info.json')
+            if osp.exists(info):
+                tuned[tag] = json.load(open(info))['tuned_thr']
+        sweep = base[(base.method == 'sweep') & (base.k == 0)]
+        sweep = aggregate(sweep, ['thr'], ALL).sort_values('thr')
         sweep.to_csv(osp.join(out, 'stage1_threshold_sweep.csv'), index=False)
         plot_sweep(sweep, osp.join(out, 'stage1_threshold_sweep.png'))
-        rows = [{'thr': f'{r.thr:.2f}' + (' (default)' if abs(r.thr - 0.5) < 1e-9 else '') +
-                        (' **(tuned)**' if tuned is not None and abs(r.thr - tuned) < 1e-9 else ''),
-                 'Recall': f'{r.recall:.1f}', 'Precision': f'{r.precision:.1f}', 'MODA': f'{r.moda:.1f}',
-                 'MODP': f'{r.modp:.1f}', 'misses': r.det_fn, 'FP': r.det_fp, 'MOTA': f'{r.mota:.1f}',
-                 'IDF1': f'{r.idf1:.1f}'} for r in sweep.itertuples()]
-        md += ['\n## 1. Stage 1 — detection threshold sweep (official checkpoint, all cameras)\n',
-               f'Tuned threshold = best MODA = **{tuned}**. Note: it is selected on the test frames (WILDTRACK has '
-               'no separate validation split), so read it as an upper bound; the full curve is shown.\n\n',
+        rows = [{'thr': f"{r['thr']:.2f}" + (' (default)' if abs(r['thr'] - 0.5) < 1e-9 else ''),
+                 'Recall': fmt(r, 'recall'), 'Precision': fmt(r, 'precision'), 'MODA': fmt(r, 'moda'),
+                 'MODP': fmt(r, 'modp'), 'misses': fmt(r, 'det_fn', 0), 'FP': fmt(r, 'det_fp', 0),
+                 'MOTA': fmt(r, 'mota'), 'IDF1': fmt(r, 'idf1')} for r in sweep.to_dict('records')]
+        md += ['\n## 1. Stage 1 — detection threshold sweep (trained TrackTacular baseline, all cameras)\n',
+               'Tuned threshold (best MODA) per baseline model: ' +
+               ', '.join(f'{t}: **{v}**' for t, v in tuned.items()) +
+               '. It is selected on the test frames (WILDTRACK has no separate validation split), so read it as an '
+               'upper bound; the full curve is shown.\n\n',
                md_table(rows, list(rows[0].keys())), '\n![sweep](stage1_threshold_sweep.png)\n']
 
-        main = off[off.method.isin(METHOD_NAMES)]
-        agg = aggregate(main, ['method', 'k'], DET + TRK + COUNTS)
-        agg.to_csv(osp.join(out, 'stages1-3_official_by_k.csv'), index=False)
+        agg = aggregate(base[base.method.isin(METHOD_NAMES)], ['method', 'k'], ALL)
+        agg.to_csv(osp.join(out, 'stages1-3_baseline_by_k.csv'), index=False)
         rows = []
         for r in agg.sort_values(['k', 'method']).to_dict('records'):
             rows.append({'k': r['k'], 'method': METHOD_NAMES[r['method']], 'MODA': fmt(r, 'moda'),
@@ -184,37 +191,37 @@ def build_report(results):
         md += ['\n## 2. Stages 1–3 on the trained TrackTacular model (no retraining), by removed cameras\n',
                'Each stage adds to the previous one. MODA changes only with the threshold (Stage 1): '
                'detections are scored before tracking.\n\n', md_table(rows, list(rows[0].keys()))]
-        plot_curves(agg.rename(columns={'method': 'name'}), 'idf1', 'Stages 1–3 (official checkpoint): IDF1',
+        plot_curves(agg.rename(columns={'method': 'name'}), 'idf1', 'Stages 1–3 (trained baseline): IDF1',
                     osp.join(out, 'stages1-3_idf1.png'), 'name', list(METHOD_NAMES))
-        plot_curves(agg.rename(columns={'method': 'name'}), 'mota', 'Stages 1–3 (official checkpoint): MOTA',
+        plot_curves(agg.rename(columns={'method': 'name'}), 'mota', 'Stages 1–3 (trained baseline): MOTA',
                     osp.join(out, 'stages1-3_mota.png'), 'name', list(METHOD_NAMES))
         md += ['\n![idf1](stages1-3_idf1.png) ![mota](stages1-3_mota.png)\n']
 
-        for grid, title in [('grid_S2', '3. Stage 2 grid — ByteTrack-style association parameters'),
-                            ('grid_S3', '4. Stage 3 grid — re-ID weight λ and match threshold')]:
-            g = off[off.method == grid]
-            if g.empty:
-                continue
-            g = g.assign(kgroup=np.where(g.k == 0, 'all cams', 'cams removed (k≥1)'))
-            ga = g.groupby(['tracker', 'kgroup'])[['mota', 'idf1', 'id_switches', 'fragmentations', 'mt']].mean()
-            ga = ga.unstack('kgroup')
-            ga.to_csv(osp.join(out, f'{grid}.csv'))
-            rows = []
-            for tracker, r in ga.iterrows():
-                row = {'tracker': tracker}
-                for kg in ['all cams', 'cams removed (k≥1)']:
-                    if ('mota', kg) in r.index:
-                        row[f'MOTA {kg}'] = f"{r[('mota', kg)]:.1f}"
-                        row[f'IDF1 {kg}'] = f"{r[('idf1', kg)]:.1f}"
-                        row[f'IDsw {kg}'] = f"{r[('id_switches', kg)]:.1f}"
-                rows.append(row)
-            md += [f'\n## {title} (official checkpoint)\n', md_table(rows, list(rows[0].keys()))]
+    for grid, title in [('grid_S2', '3. Stage 2 grid — ByteTrack-style association parameters'),
+                        ('grid_S3', '4. Stage 3 grid — re-ID weight λ and match threshold')]:
+        g = df[df.method == grid]
+        if g.empty:
+            continue
+        g = g.assign(kgroup=np.where(g.k == 0, 'all cams', 'cams removed (k≥1)'))
+        ga = g.groupby(['tracker', 'kgroup'])[['mota', 'idf1', 'id_switches', 'fragmentations', 'mt']].mean()
+        ga = ga.unstack('kgroup')
+        ga.to_csv(osp.join(out, f'{grid}.csv'))
+        rows = []
+        for tracker, r in ga.iterrows():
+            row = {'tracker': tracker}
+            for kg in ['all cams', 'cams removed (k≥1)']:
+                if ('mota', kg) in r.index:
+                    row[f'MOTA {kg}'] = f"{r[('mota', kg)]:.1f}"
+                    row[f'IDF1 {kg}'] = f"{r[('idf1', kg)]:.1f}"
+                    row[f'IDsw {kg}'] = f"{r[('id_switches', kg)]:.1f}"
+            rows.append(row)
+        md += [f"\n## {title} ({', '.join(sorted(g.tag.unique()))})\n", md_table(rows, list(rows[0].keys()))]
 
     # ---------------- Stage 4 fusion ablation (retrained models)
     tr = df[df.variant.isin(VARIANTS)]
     if not tr.empty:
         s0 = tr[tr.method == 'S0_baseline']
-        agg = aggregate(s0, ['variant', 'k'], DET + TRK + COUNTS)
+        agg = aggregate(s0, ['variant', 'k'], ALL)
         agg.to_csv(osp.join(out, 'stage4_fusion_ablation.csv'), index=False)
         rows = []
         for v in VARIANTS:
@@ -241,7 +248,7 @@ def build_report(results):
         md += ['\n![moda](stage4_moda.png) ![mota](stage4_mota.png) ![idf1](stage4_idf1.png)\n']
 
         # all methods x all variants (full grid)
-        full = aggregate(tr[tr.method.isin(METHOD_NAMES)], ['variant', 'method', 'k'], DET + TRK + COUNTS)
+        full = aggregate(tr[tr.method.isin(METHOD_NAMES)], ['variant', 'method', 'k'], ALL)
         full.to_csv(osp.join(out, 'all_variants_all_methods.csv'), index=False)
 
         # ---------------- final comparison
@@ -270,6 +277,16 @@ def build_report(results):
                             osp.join(out, f'final_{m}.png'), 'name', ['baseline', 'retrack'])
             md += ['\n![moda](final_moda.png) ![mota](final_mota.png) ![idf1](final_idf1.png)\n']
             pd.concat([base, ours]).to_csv(osp.join(out, 'final_comparison.csv'), index=False)
+
+    off = df[df.variant == 'official']
+    if not off.empty:
+        agg = aggregate(off[off.method == 'S0_baseline'], ['k'], ALL)
+        rows = [{'k': r['k'], 'MODA': fmt(r, 'moda'), 'Recall': fmt(r, 'recall'), 'MOTA': fmt(r, 'mota'),
+                 'IDF1': fmt(r, 'idf1')} for r in agg.to_dict('records')]
+        md += ['\n## Appendix: released TrackTacular checkpoint\n',
+               'The released WILDTRACK weights do not reproduce the paper with the public code (TrackTacular issues '
+               '#2 and #7 report these same numbers), which is why the baseline is retrained.\n\n',
+               md_table(rows, list(rows[0].keys()))]
 
     text = ''.join(md)
     with open(osp.join(out, 'REPORT.md'), 'w') as f:
