@@ -13,8 +13,14 @@ detection (MODA, recall, precision) and tracking (MOTA, IDF1, ID switches) with 
 threshold 0.5 (S0) and with the ByteTrack-style tracker (S2), and counts how often a fault is worse than simply
 dropping that camera.
 
+--mode calib_sweep repeats the all-camera calibration error with several random draws per setting:
+  fixed_angle       every camera rotated by exactly `angle` degrees about its own random axis
+  roll_pitch_gauss  every camera gets Gaussian roll and pitch noise with standard deviation `sigma` degrees
+                    (the extrinsic-perturbation protocol of BEVHeight-style robustness evaluations)
+It also reports how far the error moves ground points (median, world units: cm on WILDTRACK).
+
     python -m evaluation.perturb_eval --results /content/drive/MyDrive/retrack_results/full \
-        --data_dir /content/data/Wildtrack
+        --data_dir /content/data/Wildtrack [--mode calib_sweep]
 """
 import argparse
 import glob
@@ -34,6 +40,8 @@ from evaluation.retrack_eval import (S2_DEFAULTS, detection_metrics, load_model,
 ANGLES = (0.5, 1.0, 2.0)  # degrees
 ALL_CAM_ANGLES = (0.5, 1.0)
 LAGS = (1, 2)  # annotated frames (0.5 s each on WILDTRACK)
+SWEEP_ANGLES = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5)  # degrees, every camera
+SWEEP_SIGMAS = (0.25, 0.5, 0.75, 1.0)  # degrees, roll/pitch standard deviation
 
 
 def rotation(axis, angle_deg):
@@ -45,6 +53,110 @@ def rotation(axis, angle_deg):
     R = torch.eye(4)
     R[:3, :3] = torch.eye(3) + math.sin(t) * K + (1 - math.cos(t)) * K @ K
     return R
+
+
+def roll_pitch_noise(rng, sigma_deg):
+    """Gaussian pitch (about the camera x axis) and roll (about the optical axis) in the camera frame."""
+    pitch, roll = rng.normal(0.0, sigma_deg, 2)
+    return rotation([1, 0, 0], pitch) @ rotation([0, 0, 1], roll)
+
+
+def sweep_conditions(num_cams, draws, seed=0):
+    """(protocol, magnitude, draw, {camera: 4x4 rotation}) for the all-camera calibration sweep."""
+    rng = np.random.default_rng(seed)
+    conds = [('clean', 0.0, 0, None)]
+    for angle in SWEEP_ANGLES:
+        conds += [('fixed_angle', angle, d, {c: rotation(rng.normal(size=3), angle) for c in range(num_cams)})
+                  for d in range(draws)]
+    for sigma in SWEEP_SIGMAS:
+        conds += [('roll_pitch_gauss', sigma, d, {c: roll_pitch_noise(rng, sigma) for c in range(num_cams)})
+                  for d in range(draws)]
+    return conds
+
+
+def ground_displacement(items, spec, frame_step=4):
+    """
+    Median distance (world units) by which a wrong calibration moves ground points: project ground-truth positions
+    into each camera with the true calibration, back-project the pixels to the ground with the perturbed one.
+    """
+    dists = []
+    for item in items[::frame_step]:
+        gt = item['grid_gt'][0]
+        gt = gt[gt.sum(1) != 0][:, :2].float()
+        if len(gt) == 0:
+            continue
+        ref = torch.cat([gt, torch.zeros(len(gt), 1), torch.ones(len(gt), 1)], 1)
+        world = (torch.inverse(item['ref_T_global'][0].float()) @ ref.T)  # 4,N, ground at z=0
+        ground = torch.stack([world[0], world[1], torch.ones(world.shape[1])])  # 3,N
+        H_img, W_img = item['img'].shape[-2:]
+        for c, R in spec.items():
+            K = item['intrinsic'][0, c, :3, :3].float()
+            E = item['extrinsic'][0, c].float()
+            H = K @ E[:3][:, [0, 1, 3]]
+            H_wrong = K @ (R @ E)[:3][:, [0, 1, 3]]
+            pix = H @ ground
+            u = pix[:2] / pix[2].clamp(min=1e-9)
+            visible = (pix[2] > 0) & (u[0] >= 0) & (u[0] < W_img) & (u[1] >= 0) & (u[1] < H_img)
+            back = torch.linalg.solve(H_wrong, pix)
+            ok = visible & (back[2].abs() > 1e-9)
+            if ok.any():
+                xy = back[:2, ok] / back[2, ok]
+                dists.append((xy - ground[:2, ok]).norm(dim=0))
+    return float(torch.cat(dists).median()) if dists else float('nan')
+
+
+def condition_metrics(frames):
+    row = {}
+    det = detection_metrics(frames, 0.5)
+    row.update({k: det[k] for k in ('moda', 'modp', 'recall', 'precision', 'det_fn', 'det_fp')})
+    for name, kw in [('S0', dict(tracker='baseline', track_buffer=5)), ('S2', S2_DEFAULTS)]:
+        trk = tracking_metrics(frames, 0.5, kw)
+        row.update({f'{name}_{k}': trk[k] for k in ('mota', 'idf1', 'id_switches', 'fragmentations')})
+    return row
+
+
+def calib_sweep_model(ckpt, tag, variant, data_dir, out_dir, draws=5, max_frames=None):
+    out = osp.join(out_dir, f'{tag}.csv')
+    if osp.exists(out):
+        print(f'[{tag}] already done -> {out}')
+        return pd.read_csv(out)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model, _ = load_model(ckpt, device)
+    items = load_test_items(data_dir, model)
+    if max_frames:
+        items = items[:max_frames]
+    num_cams = items[0]['img'].shape[1]
+    rows, t0 = [], time.time()
+    for protocol, mag, draw, spec in sweep_conditions(num_cams, draws):
+        perturb = None if spec is None else make_perturb('rot_all', list(spec), spec, items)
+        row = {'tag': tag, 'variant': variant, 'protocol': protocol, 'magnitude': mag, 'draw': draw,
+               'ground_shift': 0.0 if spec is None else ground_displacement(items, spec)}
+        row.update(condition_metrics(run_inference(model, items, perturb=perturb)))
+        rows.append(row)
+        print(f'[{tag}] {protocol:16s} {mag:<5} draw {draw}  ground shift {row["ground_shift"]:6.1f}  '
+              f'MODA {row["moda"]:6.2f}  recall {row["recall"]:6.2f}  MOTA {row["S0_mota"]:6.2f}  '
+              f'({time.time() - t0:.0f}s)', flush=True)
+    df = pd.DataFrame(rows)
+    os.makedirs(out_dir, exist_ok=True)
+    df.to_csv(out, index=False)
+    return df
+
+
+def summarise_sweep(df):
+    lines = []
+    for variant, g in df.groupby('variant', sort=False):
+        clean = g[g.protocol == 'clean'].iloc[0]
+        lines.append(f'\n### {variant}  (clean: MODA {clean.moda:.1f}, MOTA {clean.S0_mota:.1f}, IDF1 {clean.S0_idf1:.1f})\n')
+        lines.append('| protocol | magnitude (°) | ground shift | MODA (mean ± std over draws) | ΔMODA | recall '
+                     '| precision | MOTA (S0) | IDF1 (S0) | MOTA (S2) | IDF1 (S2) |')
+        lines.append('|---|---|---|---|---|---|---|---|---|---|---|')
+        for (protocol, mag), h in g[g.protocol != 'clean'].groupby(['protocol', 'magnitude'], sort=False):
+            name = 'fixed angle, all cameras' if protocol == 'fixed_angle' else 'roll/pitch Gaussian σ, all cameras'
+            lines.append(f'| {name} | {mag:g} | {h.ground_shift.median():.0f} | {h.moda.mean():.1f} ± {h.moda.std():.1f} '
+                         f'| {h.moda.mean() - clean.moda:+.1f} | {h.recall.mean():.1f} | {h.precision.mean():.1f} '
+                         f'| {h.S0_mota.mean():.1f} | {h.S0_idf1.mean():.1f} | {h.S2_mota.mean():.1f} '
+                         f'| {h.S2_idf1.mean():.1f} |')
+    return '\n'.join(lines)
 
 
 def make_conditions(num_cams, cams, seed=0):
@@ -98,11 +210,7 @@ def evaluate_model(ckpt, tag, variant, data_dir, out_dir, cams=None, max_frames=
                                perturb=make_perturb(kind, cs, spec, items))
         row = {'tag': tag, 'variant': variant, 'kind': kind, 'magnitude': mag,
                'cameras': '-'.join(str(c + 1) for c in cs) or 'none'}
-        det = detection_metrics(frames, 0.5)
-        row.update({k: det[k] for k in ('moda', 'modp', 'recall', 'precision', 'det_fn', 'det_fp')})
-        for name, kw in [('S0', dict(tracker='baseline', track_buffer=5)), ('S2', S2_DEFAULTS)]:
-            trk = tracking_metrics(frames, 0.5, kw)
-            row.update({f'{name}_{k}': trk[k] for k in ('mota', 'idf1', 'id_switches', 'fragmentations')})
+        row.update(condition_metrics(frames))
         rows.append(row)
         print(f'[{tag}] {kind:7s} {mag:<4} cams={row["cameras"]:>13s}  MODA {row["moda"]:6.2f}  '
               f'MOTA {row["S0_mota"]:6.2f}  IDF1 {row["S0_idf1"]:6.2f}  ({time.time() - t0:.0f}s)', flush=True)
@@ -155,6 +263,8 @@ if __name__ == '__main__':
     p.add_argument('--variants', nargs='+', default=None, help='only these variants (default: all finished)')
     p.add_argument('--cams', type=int, nargs='+', default=None, help='0-based cameras to perturb (default: all)')
     p.add_argument('--max_frames', type=int, default=None, help='debug: only the first N test frames')
+    p.add_argument('--mode', choices=['faults', 'calib_sweep'], default='faults')
+    p.add_argument('--draws', type=int, default=5, help='calib_sweep: random draws per setting')
     args = p.parse_args()
     torch.set_float32_matmul_precision('medium')
 
@@ -169,6 +279,20 @@ if __name__ == '__main__':
     runs.sort(key=lambda r: r[2] != 'concat')
     print('evaluating:', [r[1] for r in runs])
 
+    if args.mode == 'calib_sweep':
+        out_dir = osp.join(out_dir, 'calib_sweep')
+        dfs = [calib_sweep_model(ckpt, tag, variant, args.data_dir, out_dir, args.draws, args.max_frames)
+               for ckpt, tag, variant in runs]
+        text = '# Calibration sweep: every camera miscalibrated\n' \
+               f'Threshold 0.5. {args.draws} random draws per setting. The model keeps the original calibration ' \
+               'while the cameras are rotated. "Ground shift" = median distance a ground point moves when ' \
+               'projected into a camera and back with the wrong calibration (cm on WILDTRACK). ' \
+               'S0 = TrackTacular tracker, S2 = ByteTrack-style tracker.\n' + \
+               summarise_sweep(pd.concat(dfs, ignore_index=True))
+        with open(osp.join(out_dir, 'CALIB_SWEEP.md'), 'w') as f:
+            f.write(text)
+        print('\n' + text + f'\n\nwritten to {out_dir}/CALIB_SWEEP.md')
+        raise SystemExit
     dfs = [evaluate_model(ckpt, tag, variant, args.data_dir, out_dir, args.cams, args.max_frames)
            for ckpt, tag, variant in runs]
     text = '# Robustness pilot: camera faults other than a dropped camera\n' \

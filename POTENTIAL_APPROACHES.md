@@ -1,7 +1,7 @@
 # Potential approaches: robustness to camera calibration errors
 
-Status: **proposal, nothing here is implemented yet.** Start only if the full robustness pilot confirms the problem
-(see the decision gate at the end).
+Status: **proposal, nothing here is implemented yet.** The full robustness pilot confirmed the problem (see the
+findings below and the decision gate at the end).
 
 ## Why this document exists
 
@@ -16,11 +16,36 @@ improve on TrackTacular's concatenation fusion. With one seed, averaged over eve
 | masked + coverage + dropout | 90.6 | 81.7 |
 | weighted + coverage + dropout | 89.1 | 82.0 |
 
-The baseline already tolerates *missing* cameras well. The robustness pilot (`evaluation/perturb_eval.py`) tests
-other camera faults. In a first 5-frame check, the baseline was barely affected by one miscalibrated camera, but
-**a 1° calibration error on all seven cameras dropped MODA from 85.3 to 65.3**, far more than losing three whole
-cameras (about −8). Five frames is about 100 people, so this has to be confirmed on all 40 test frames before acting on
-it.
+The baseline already tolerates *missing* cameras well. The robustness pilot (`evaluation/perturb_eval.py`,
+evaluation only, all 40 test frames, seed 1) tested other camera faults:
+
+| Fault (TrackTacular baseline, clean MODA 90.9) | ΔMODA | Worse than dropping that camera |
+|---|---|---|
+| Camera dropped (reference) | −1.4 | — |
+| 1 camera rotated 0.5° / 1° / 2° (model keeps the old calibration) | −0.5 / −2.3 / −3.7 | 2/7 / 5/7 / 6/7 cameras |
+| 1 camera 1 / 2 frames late (0.5 / 1 s) | −3.2 / −4.1 | 5/7 / 6/7 |
+| 1 camera frozen on one image | −6.3 | 7/7 |
+| All cameras rotated 0.5° | −5.8 | — |
+| **All cameras rotated 1°** | **−35.4** (MODA 55.5) | — |
+
+Findings:
+
+1. **A wrong camera is worse than a missing one.** A frozen camera does more damage than switching it off for every
+   camera; 1–2° of drift or 1–2 frames of lag does for most cameras. The model handles missing input well but trusts
+   bad input.
+2. **All-camera calibration error has a cliff between 0.5° and 1°** (−6 → −35 MODA). Almost all of the loss is
+   missed people: recall falls from 95% to 61% while precision stays above 90%, consistent with misaligned views no
+   longer reinforcing each other.
+3. **None of the Stage 4 fusion variants fixes it.** At all-camera 1°: concat −35.4, concat + dropout −40.1,
+   masked + dropout −31.6, masked + coverage + dropout −27.0, weighted + coverage + dropout −33.4. Masked fusion is
+   somewhat less sensitive, but this is one seed and one set of random rotation axes.
+4. **The ByteTrack-style tracker (Stage 2) helps under drift**: at all-camera 1° it raises the baseline's MOTA from
+   57.4 to 64.1, and on masked fusion IDF1 from 69.0 to 78.8, by recovering weakened detections. With clean cameras
+   it is slightly worse than the original tracker.
+
+Caveats: one training seed; each rotation condition used a single random axis per camera. The calibration sweep
+(`--mode calib_sweep`) repeats the all-camera case with several random draws, finer angles and the published
+roll/pitch Gaussian protocol before any training is started.
 
 Calibration errors are a real deployment problem: cameras get bumped, mounts move with wind and heat, and
 recalibration is never perfect. WILDTRACK's own calibration is not exact either: projected ground positions land
@@ -90,6 +115,9 @@ disagrees with the others, switch it off and let the remaining views carry the d
 - Runs at test time inside the tracking loop; no retraining.
 
 **Cost.** Moderate engineering (scoring, windowing, thresholds), no training.
+
+**Easy first case: frozen cameras.** A frozen camera sends an identical image every frame, which is trivial to
+detect from frame differences. Dropping it would recover about 5 MODA (−6.3 → −1.4 for the baseline).
 
 **Expected outcome.** Recovers most of the loss when **one** camera is miscalibrated, lagging or frozen: turns
 "wrong camera" into "dropped camera". The same detector handles lag and frozen cameras.
@@ -167,7 +195,10 @@ authors attribute to overfitting the small dataset. Hard to justify for this pro
 
 ## Decision gate
 
-Do not start any of these until the full pilot has run:
+**Outcome (seed 1): passed.** All-camera calibration error of 1° costs 35 MODA and single-camera faults
+are mostly worse than a dropped camera. Remaining check before training: the calibration sweep below.
+
+The gate was: do not start any of these until the full pilot has run:
 
 ```
 python -m evaluation.perturb_eval --results <results>/full --data_dir <data>/Wildtrack
