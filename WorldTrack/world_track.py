@@ -38,6 +38,8 @@ class WorldTrackModel(pl.LightningModule):
             fusion_hidden_dim=16,
             cam_dropout_prob=0.0,  # probability that a training sample has cameras switched off
             cam_dropout_max=3,  # at most this many cameras are switched off per sample
+            calib_noise_deg=0.0,  # std of the Gaussian roll/pitch noise added to camera extrinsics in training
+            calib_noise_prob=0.5,  # probability that a training sample gets calibration noise
             test_drop_cams: Optional[List[int]] = None,  # cameras switched off at test time
             # Retrack Stages 2-3: tracker used by `test`
             tracker='baseline',  # 'baseline' | 'byte'
@@ -82,6 +84,8 @@ class WorldTrackModel(pl.LightningModule):
         # Camera dropout
         self.cam_dropout_prob = cam_dropout_prob
         self.cam_dropout_max = cam_dropout_max
+        self.calib_noise_deg = calib_noise_deg
+        self.calib_noise_prob = calib_noise_prob
         self.test_drop_cams = list(test_drop_cams) if test_drop_cams else []
 
         # Model
@@ -126,7 +130,7 @@ class WorldTrackModel(pl.LightningModule):
         output = self.model(
             rgb_cams=item['img'],
             pix_T_cams=item['intrinsic'],
-            cams_T_global=item['extrinsic'],
+            cams_T_global=self.perturb_calibration(item['extrinsic']),
             ref_T_global=item['ref_T_global'],
             vox_util=self.vox_util,
             prev_bev=prev_bev,
@@ -137,6 +141,33 @@ class WorldTrackModel(pl.LightningModule):
             self.store_cache(item['frame'].cpu(), output['bev_raw'].clone().detach())
 
         return output
+
+    def perturb_calibration(self, extrinsic):
+        """
+        Calibration-noise augmentation (training only). With probability calib_noise_prob a sample gets a random
+        subset of 1..S cameras whose extrinsics are rotated by Gaussian pitch (about the camera x axis) and roll
+        (about the optical axis) with std calib_noise_deg, while the images stay unchanged. This simulates
+        cameras that have drifted since calibration, as in evaluation/perturb_eval.py (roll_pitch_gauss).
+        extrinsic: B,S,4,4 (cams_T_global)
+        """
+        if not self.training or self.calib_noise_deg <= 0:
+            return extrinsic
+        B, S = extrinsic.shape[:2]
+        extrinsic = extrinsic.clone()
+        for b in range(B):
+            if torch.rand(1).item() >= self.calib_noise_prob:
+                continue
+            k = int(torch.randint(1, S + 1, (1,)).item())
+            cams = torch.randperm(S)[:k]
+            pitch, roll = torch.deg2rad(torch.randn(2, k) * self.calib_noise_deg).to(extrinsic)
+            cp, sp, cr, sr = pitch.cos(), pitch.sin(), roll.cos(), roll.sin()
+            one, zero = torch.ones_like(cp), torch.zeros_like(cp)
+            Rx = torch.stack([one, zero, zero, zero, cp, -sp, zero, sp, cp], -1).view(k, 3, 3)
+            Rz = torch.stack([cr, -sr, zero, sr, cr, zero, zero, zero, one], -1).view(k, 3, 3)
+            R = torch.eye(4, device=extrinsic.device, dtype=extrinsic.dtype).repeat(k, 1, 1)
+            R[:, :3, :3] = Rx @ Rz
+            extrinsic[b, cams] = R @ extrinsic[b, cams]
+        return extrinsic
 
     def get_cam_mask(self, item):
         """

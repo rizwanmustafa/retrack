@@ -1,0 +1,8 @@
+# Approach 1: TrackTacular concatenation fusion + calibration-noise training (no camera dropout), so that it
+# differs from configs/v_concat.yml only by the calibration noise
+model:
+  fusion: concat
+  coverage_map: false
+  cam_dropout_prob: 0.0
+  calib_noise_deg: 0.5
+  calib_noise_prob: 0.5

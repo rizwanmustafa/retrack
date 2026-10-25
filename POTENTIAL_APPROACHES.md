@@ -44,8 +44,47 @@ Findings:
    it is slightly worse than the original tracker.
 
 Caveats: one training seed; each rotation condition used a single random axis per camera. The calibration sweep
-(`--mode calib_sweep`) repeats the all-camera case with several random draws, finer angles and the published
-roll/pitch Gaussian protocol before any training is started.
+below repeats the calibration error with several random draws, finer angles and the published roll/pitch protocol.
+
+### Calibration sweep (`--mode calib_sweep`, 5 random draws per setting)
+
+Every model sees exactly the same perturbations, so models can be compared draw by draw. Reprojection error is the
+median pixel error the wrong calibration causes at full resolution; WILDTRACK's own calibration already has 2–17 px.
+
+**Where the baseline breaks** (TrackTacular concat, every camera rotated by the same angle):
+
+| Error per camera | Reprojection error | Ground shift | ΔMODA (mean ± std) |
+|---|---|---|---|
+| 0.25° | 7 px | 17 cm | −0.9 ± 0.4 |
+| 0.5° | 14 px | 32 cm | −3.7 ± 2.8 |
+| 0.75° | 21 px | 41 cm | −17.9 ± 11.1 |
+| 1° | 29 px | 68 cm | −47.4 ± 18.1 |
+| 1.25° | 34 px | 73 cm | −61.9 ± 9.5 |
+
+- The cliff lies between about **14 and 21 px** of additional error, just above the error a real installation
+  already has. Loss is again mostly recall (people missed), precision stays high.
+- **Published roll/pitch protocol**: σ = 0.25° (6 px) −0.9; **σ = 0.5° (9 px median) −13.1 ± 12.3**; σ = 0.75°
+  −24.6; σ = 1° −25.5. The large spread comes from draws in which one or two cameras get a large tilt.
+- **How many cameras are wrong** (1° each): k = 1 −2.4, k = 2 −3.4, k = 3 −14.5, k = 4 −19.5, k = 5 −23.2,
+  k = 6 −20.4, k = 7 −45.9. The model tolerates one or two miscalibrated cameras and degrades from three on.
+
+**Masked fusion is consistently more robust** (ΔMODA, same perturbations):
+
+| Condition | concat | concat + dropout | masked + dropout | masked + coverage + dropout | weighted + coverage + dropout |
+|---|---|---|---|---|---|
+| All cameras 0.75° | −17.9 | −19.9 | **−12.9** | −13.9 | −14.3 |
+| All cameras 1° | −47.4 | −49.5 | **−40.1** | −41.7 | −47.5 |
+| Roll/pitch σ = 0.5° | −13.1 | −14.8 | −9.4 | **−9.1** | −12.4 |
+| 3 cameras at 1° | −14.5 | −16.0 | −10.1 | **−8.6** | −11.8 |
+| 5 cameras at 1° | −23.2 | −26.0 | −15.8 | **−16.6** | −20.7 |
+| All 7 cameras at 1° | −45.9 | −50.3 | −38.1 | **−35.8** | −41.6 |
+
+Draw by draw, masked + dropout beat concat + dropout in all 20 draws checked (all-camera 0.75° and 1°, 3 and 7
+cameras at 1°). Camera dropout alone does not help (concat + dropout is slightly worse than concat); averaging
+over the working cameras is what helps.
+
+**The ByteTrack-style tracker (Stage 2) recovers part of the loss** under large errors: baseline MOTA 49.7 → 54.1 at
+1° on all cameras, 50.9 → 57.1 with all 7 cameras at 1°, 68.2 → 73.5 at roll/pitch σ = 1°.
 
 Calibration errors are a real deployment problem: cameras get bumped, mounts move with wind and heat, and
 recalibration is never perfect. WILDTRACK's own calibration is not exact either: projected ground positions land
@@ -89,6 +128,13 @@ the model learns not to depend on pixel-perfect alignment across views.
   comparable and the magnitudes are not arbitrary.
 
 **Cost.** About 20 lines of code; one ~30-minute training run per seed.
+
+**Status: implemented** (`WorldTrackModel.perturb_calibration` in `world_track.py`, hyperparameters
+`calib_noise_deg` and `calib_noise_prob`). With probability `calib_noise_prob` a training sample gets a random subset
+of 1–7 cameras rotated by Gaussian pitch and roll with standard deviation `calib_noise_deg`, the same convention as the
+evaluation protocol. Two variants, each differing from an existing model only by the noise:
+`configs/v_concat_calib.yml` (vs `concat`) and `configs/v_masked_calib.yml` (vs `masked_drop`), both with
+σ = 0.5° and probability 0.5. σ = 0.5° is where the roll/pitch sweep starts to hurt (median 9 px).
 
 **Expected outcome.** Partial tolerance to small errors. It may cost a little accuracy with clean calibration,
 similar to how camera-dropout training trades a little clean accuracy for robustness.
@@ -187,7 +233,8 @@ authors attribute to overfitting the small dataset. Hard to justify for this pro
 
 ## Recommendation
 
-1. **Approach 1 first**: cheap, has published precedent, and gives a fair comparison with the literature.
+1. **Approach 1 first**: cheap, has published precedent, and gives a fair comparison with the literature. Run it
+   on both concatenation and masked fusion, since masked fusion is already the more robust and lighter model.
 2. **Then Approach 2 or 3 as the project's own contribution.** Approach 3 is the strongest story (a system that
    recalibrates itself) but is real research and may not work; Approach 2 is the safer fallback and reuses the
    camera masking built for Stage 4.

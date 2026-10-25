@@ -33,6 +33,8 @@ import zipfile
 
 HERE = osp.dirname(osp.abspath(__file__))
 VARIANTS = ['concat', 'concat_drop', 'masked_drop', 'masked_cov_drop', 'weighted_cov_drop']
+# Approach 1 (calibration-noise training), run on request: --variants concat_calib masked_calib
+EXTRA_VARIANTS = ['concat_calib', 'masked_calib']
 SEEDS = [80085, 1, 2, 3, 4]  # 80085 is the repo's / official checkpoint's seed
 ZOO_URL = 'https://github.com/tteepe/TrackTacular/releases/download/v1/wild_{model}.zip'
 KAGGLE_WILDTRACK = 'aryashah2k/large-scale-multicamera-detection-dataset'
@@ -166,7 +168,7 @@ def main():
                    help='lifting method (segnet = bilinear sampling, the best TrackTacular model on WILDTRACK)')
     p.add_argument('--seeds', type=int, default=None, help='training seeds per fusion variant (full: 3, quick: 1)')
     p.add_argument('--epochs', type=int, default=None, help='full: 30 as in the paper, quick: 2')
-    p.add_argument('--variants', nargs='+', default=VARIANTS, choices=VARIANTS)
+    p.add_argument('--variants', nargs='+', default=VARIANTS, choices=VARIANTS + EXTRA_VARIANTS)
     p.add_argument('--batch_size', type=int, default=2)
     p.add_argument('--accumulate', type=int, default=8)
     p.add_argument('--num_workers', type=int, default=min(8, os.cpu_count() or 2))
@@ -207,7 +209,7 @@ def main():
         for variant in variants:
             ckpt = train(variant, seed, data_dir, args.results, args)
             tag = f'{variant}_s{seed}'
-            primary = seed == seeds[0] and variant == variants[0]
+            primary = seed == seeds[0] and variant == 'concat'
             if primary:
                 sanity_check(ckpt, data_dir, args.results, tag)
             evaluate(ckpt, data_dir, args.results, tag, variant, seed, args, grids=primary)

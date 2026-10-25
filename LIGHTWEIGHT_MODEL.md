@@ -37,15 +37,30 @@ Averaged over every combination of removed cameras (k = number removed), thresho
 Across the 63 camera-removal combinations, masked fusion has the higher MODA in 13 (so a small but consistent
 detection loss), the higher MOTA in 29 and the higher IDF1 in 35 (tracking: no meaningful difference).
 
-**Calibration errors** (robustness pilot): with 1° of error on every camera, masked fusion loses less than
-concatenation (MODA −31.6 vs −35.4; with the coverage map −27.0). This is one seed and one set of random rotations,
-so treat it as a hint until the calibration sweep confirms it.
+## Robustness to calibration errors
+
+The calibration sweep (`python -m evaluation.perturb_eval --mode calib_sweep`, 5 random draws per setting, identical
+perturbations for every model) shows masked fusion is **consistently more robust** than concatenation:
+
+| Calibration error | concat ΔMODA | masked ΔMODA |
+|---|---|---|
+| All cameras 0.5° (14 px) | −3.7 | **−2.5** |
+| All cameras 0.75° (21 px) | −17.9 | **−12.9** |
+| All cameras 1° (29 px) | −47.4 | **−40.1** |
+| Roll/pitch Gaussian σ = 0.5° | −13.1 | **−9.4** |
+| 3 of 7 cameras at 1° | −14.5 | **−10.1** |
+| 5 of 7 cameras at 1° | −23.2 | **−15.8** |
+
+Compared draw by draw with the concatenation model trained with the same camera dropout, masked fusion was better in
+all 20 draws checked. A plausible reason: averaging over the cameras that see a cell weakens the effect of one
+misaligned view, whereas the concatenation convolution has learned to rely on every view being aligned.
 
 ## Interpretation
 
 - For **tracking**, which is what the live system shows, the lighter model is as good as TrackTacular.
 - For **detection**, it is about 0.5–1 MODA lower, roughly 5–10 people over the 40 test frames.
-- It is a reasonable default for the web system, where speed and memory matter more than the last MODA point.
+- It is a reasonable default for the web system, where speed and memory matter more than the last MODA point,
+  and where cameras drift over time: it is also 4–8 MODA more robust to calibration errors.
 
 ## Caveats and next steps
 

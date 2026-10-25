@@ -14,7 +14,8 @@ import os.path as osp
 import numpy as np
 import pandas as pd
 
-VARIANTS = ['concat', 'concat_drop', 'masked_drop', 'masked_cov_drop', 'weighted_cov_drop']
+VARIANTS = ['concat', 'concat_drop', 'masked_drop', 'masked_cov_drop', 'weighted_cov_drop', 'concat_calib',
+            'masked_calib']
 VARIANT_NAMES = {
     'official': 'Official TrackTacular checkpoint',
     'concat': 'Concat (baseline)',
@@ -22,6 +23,8 @@ VARIANT_NAMES = {
     'masked_drop': 'Masked + cam-dropout',
     'masked_cov_drop': 'Masked + coverage + cam-dropout',
     'weighted_cov_drop': 'Weighted + coverage + cam-dropout (Retrack)',
+    'concat_calib': 'Concat + calibration noise',
+    'masked_calib': 'Masked + cam-dropout + calibration noise',
     'baseline': 'TrackTacular baseline',
     'retrack': 'Retrack (full)',
 }
@@ -32,8 +35,8 @@ METHOD_NAMES = {
     'S3_byte_reid': 'S3 + camera-dropout-aware re-ID',
 }
 # validated categorical order (dataviz reference palette, light mode)
-COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300']
-MARKERS = ['o', 's', '^', 'D', 'v', 'P']
+COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6']
+MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X']
 
 DET = ['moda', 'modp', 'precision', 'recall']
 TRK = ['mota', 'idf1', 'mt', 'ml', 'id_switches', 'fragmentations']
