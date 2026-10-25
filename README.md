@@ -1,3 +1,80 @@
+# Retrack — robust multi-view pedestrian tracking on top of TrackTacular
+
+This repository extends [TrackTacular](https://arxiv.org/abs/2403.12573) with the four stages of the Retrack
+methodology (see `final-literature-review-plus-proposed-approach.docx`) and an end-to-end pipeline that compares
+the TrackTacular baseline with Retrack on WILDTRACK, with all cameras and with cameras removed.
+
+## Run everything in Colab (one cell)
+
+1. Open `Retrack_Colab.ipynb` in Colab (File → Open notebook → GitHub → `rizwanmustafa/retrack`), or paste its single
+   cell into a new notebook.
+2. Runtime → Change runtime type → **A100 GPU**, High-RAM.
+3. Set `MODE` (`'quick'` first, then `'full'`) and run the cell.
+
+The cell mounts Google Drive, clones this repo, installs the dependencies (no numpy downgrade, so no runtime
+restart), downloads WILDTRACK from Kaggle and the official TrackTacular checkpoint, runs every experiment and
+displays the report. All outputs go to `MyDrive/retrack_results/<mode>/`. Each step is skipped when its output
+already exists and interrupted training resumes from `last.ckpt`, so **if Colab disconnects, run the cell
+again**.
+
+| mode | what runs | time on an A100 (rough estimate, not measured) |
+|---|---|---|
+| `quick` | everything, but 2 epochs, 1 seed, ≤1 removed camera | ~1–2 h |
+| `full`  | 5 fusion variants × 3 seeds × 30 epochs (the paper schedule), 0–3 removed cameras (all 64 combinations) | ~1 h per training run, plus evaluation |
+
+Optional Colab Secrets: `KAGGLE_USERNAME`/`KAGGLE_KEY` (if the anonymous Kaggle download is refused) and
+`GITHUB_TOKEN` (if the repository is private). Without Colab: `bash colab/run.sh <quick|full> <results_dir>`, or
+`cd WorldTrack && python retrack_pipeline.py --help`.
+
+### Outputs (`<results>/<mode>/`)
+- `report/REPORT.md`: all tables (also as CSV) and plots:
+  0. sanity check: the evaluation engine reproduces TrackTacular's own `test` numbers on the official checkpoint
+  1. Stage 1 threshold sweep (recall / precision / MODA / MODP / MOTA / IDF1 per threshold)
+  2. Stages 1–3 applied to the trained TrackTacular model, by number of removed cameras
+  3. Stage 2 parameter grid (low threshold × track buffer)
+  4. Stage 3 parameter grid (λ × appearance threshold)
+  5. Stage 4 fusion ablation (5 variants, mean ± std over seeds, spread over camera combinations, slope per removed camera)
+  6. final comparison: TrackTacular baseline vs full Retrack, with raw counts of misses, false positives, ID switches and fragmentations
+- `eval/<model>/metrics.csv`: every metric for every model × removed-camera combination × configuration
+- `runs/`: training logs and checkpoints, `model_zoo/`: the official checkpoint
+
+## What is implemented, and where
+
+| Proposal | Code |
+|---|---|
+| **Stage 1** threshold sweep, no retraining | `evaluation/retrack_eval.py` (`THRESHOLDS`, `pick_threshold`) |
+| **Stage 2** ByteTrack-style association on BEV points: high-confidence pass against all tracks, low-confidence pass (motion only, centre distance instead of IoU) against the unmatched tracks only, new tracks only from high-confidence detections, longer track buffer (5 → 10) | `tracking/multitracker.py` (`ByteBEVTracker`) |
+| **Stage 3** appearance from the *working* cameras only: person box (assumed height = 0.9 × z-range, i.e. 180 cm) projected into every working camera, cropped, embedded with pretrained OSNet-x1.0 (MSMT17), averaged over the views that see the person; running-average track descriptor; `D = λ·D_app + (1-λ)·D_motion` (λ = 0.98) in the high-confidence pass only | `tracking/reid.py`, `ByteBEVTracker.first_pass_cost` |
+| **Stage 4** camera-dropout training | `WorldTrackModel.get_cam_mask` (`cam_dropout_prob`, `cam_dropout_max`) |
+| masked fusion with an explicit camera mask × field-of-view mask (instead of the "feature == 0" test) | `models/fusion.py` (`fuse_views`), FOV masks from `utils/vox.py` (`return_valid=True`) |
+| coverage map `c(x,y) = 1/N Σ m_n(x,y)` as an extra BEV channel | `models/fusion.py` (`coverage_map`), used in `models/segnet.py`, `mvdet.py`, `liftnet.py` |
+| learned per-camera weighting (masked softmax over a 2-layer scorer; zero-initialised so it starts as the masked mean) | `models/fusion.py` (`CameraScorer`, `masked_softmax_weights`) |
+| camera removal at test time (averaged over all combinations of k removed cameras) | `WorldTrackModel.test_drop_cams`, `evaluation/retrack_eval.py` (`camera_conditions`) |
+| experiment variants | `configs/v_concat.yml`, `v_concat_drop.yml`, `v_masked_drop.yml`, `v_masked_cov_drop.yml`, `v_weighted_cov_drop.yml`, schedule `configs/t_retrack.yml` |
+| orchestration and report | `retrack_pipeline.py`, `evaluation/retrack_report.py` |
+
+With the default settings (`fusion: concat`, no dropout, `tracker: baseline`) the code behaves exactly like the
+original TrackTacular, and the released checkpoints load unchanged.
+
+### Design decisions you should know about
+- **Camera failure model:** a removed camera's projected BEV features are zeroed and the camera is marked as
+  missing (the camera "sends nothing"). The image-view auxiliary loss is unchanged.
+- **Lifting method:** Segnet (bilinear sampling), TrackTacular's best WILDTRACK model. `--model mvdet|liftnet`
+  also works; robust fusion is implemented for all three. It is not implemented for BEVFormer, which needs mmcv.
+- **Which checkpoint is evaluated:** retrained models are evaluated at the **last epoch**. WILDTRACK's validation
+  frames are its test frames, so picking the best epoch by validation loss (as the released checkpoints were)
+  would be selection on the test set.
+- **Tuned threshold:** chosen as the best MODA on the test frames for lack of a validation split. The report says so
+  and shows the full sweep. The Stage 2 and 3 parameters are fixed in advance, and the grids are reported separately.
+- **Stage 1–3 baseline:** the official released TrackTacular checkpoint. The Stage 4 / final baseline is the
+  retrained concatenation model, trained with the same schedule and seeds as the Retrack variants.
+- The detection evaluation also counts frames in which nothing is detected; the original code skipped them. This
+  only matters with many cameras removed.
+- Compatibility fixes for current Colab (torch ≥ 2.2 sampler, mmcv optional, missing datamodule imports, numpy 2
+  shim for motmetrics, device-agnostic normalisation buffers).
+
+---
+
 # TrackTacular :octopus:
 
 **Lifting Multi-View Detection and Tracking to the Bird’s Eye View**
