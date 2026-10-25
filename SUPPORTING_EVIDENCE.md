@@ -37,6 +37,25 @@ Status labels:
 | *Robust multi-camera BEV perception: an image-perceptive approach* (IROS 2024) | Claims resilience to calibration errors and pose fluctuations on nuScenes. Perturbation protocol unknown. | From search summary |
 | *CalibRobustBEV* (JUSTC) | BEV multi-modal detector that generates miscalibration scenarios during training. Camera + LiDAR, not camera-only. | From search summary |
 
+## 3a. Multi-camera pedestrian work and calibration
+
+No paper found so far **trains** a multi-camera pedestrian detector or tracker with calibration noise. Existing work
+notes the sensitivity, works around it, or avoids calibration altogether:
+
+| Work | Relation to calibration | Status |
+|---|---|---|
+| [Multiview Detection with Cardboard Human Modeling](https://arxiv.org/abs/2207.02013) (2022; ACCV 2024 supplement) | Shows on WILDTRACK that "trivial calibration error leads to huge edge shifting of the detection plane", worse near the stairs at the edge; masks the affected regions during evaluation and notes that previous methods also score higher after masking. Evidence that calibration error matters on WILDTRACK, but handled by masking, not by training. | From search summary |
+| [Robust multiple cameras pedestrian detection with multi-view Bayesian network (MvBN)](https://research.buaa.edu.cn/en/publications/robust-multiple-cameras-pedestrian-detection-with-multi-view-baye/) (2015) | States that calibration errors and varied pedestrian heights "may also heavily decrease the detection performance"; tolerates them with a height-adaptive projection that searches a small neighbourhood of heights and positions. A pre-deep-learning, non-trained remedy. | From abstract |
+| [Calibration-Free Multi-View Crowd Counting (CF-MVCC)](https://www.ecva.net/papers/eccv_2022/papers_ECCV/html/1929_ECCV_2022_paper.php) (ECCV 2022) and [WSCF-MVCC](https://arxiv.org/abs/2512.02359) (2025) | Avoid calibration at test time by estimating camera-pair homographies and matching maps. Crowd **counting**, not detection or tracking; datasets used not yet checked. | From abstract or search summary |
+| [GRACE](https://arxiv.org/abs/2609.16872) (2026) | Few-camera BEV pedestrian tracking; addresses the stretching of BEV responses caused by ground-plane projection, not calibration error. | From search summary |
+| [WILDTRACK](https://fleuret.org/papers/chavdarova-et-al-cvpr2018.pdf) (CVPR 2018) | Describes its joint calibration as high-precision. Our own measurement still finds 2–17 px median reprojection error per camera (Section 5). | Paper claim; our measurement verified |
+
+**Positioning for the write-up.** Calibration-noise training is established in driving and roadside perception
+(Sections 2–3); multi-camera pedestrian work has noted calibration sensitivity (cardboard modelling, MvBN) but handled
+it by masking, local search or calibration-free counting. This project measures the sensitivity of a modern
+multi-view pedestrian tracker, shows masked fusion is more robust, and tests calibration-noise training for
+multi-view pedestrian detection and tracking.
+
 ## 3b. Choosing perturbation magnitudes for fixed cameras
 
 The driving literature is a guide to *what* to perturb, not *how much*. Vehicle rigs suffer vibration and body
@@ -99,7 +118,11 @@ All on WILDTRACK, retrained TrackTacular (Segnet, bilinear sampling), seed 1, al
 ## 7. Gaps to close before claiming novelty
 
 - [ ] Literature search: robustness to calibration error, camera lag or frozen cameras in **multi-view pedestrian
-      detection/tracking** (WILDTRACK, MultiviewX). A limited search found none.
+      detection/tracking** (WILDTRACK, MultiviewX). Two targeted searches found no work that trains against
+      calibration error (Section 3a); go through the papers citing MVDet, EarlyBird and TrackTacular that mention
+      "calibration" before claiming novelty.
+- [ ] Read the cardboard-modelling paper's calibration analysis and the MvBN paper; check which datasets CF-MVCC and
+      WSCF-MVCC use (WILDTRACK or not).
 - [ ] Read Klinghoffer et al. (2023), the Lift-Splat-Shoot paper and BEVHeight's protocol details (noise units).
 - [ ] Find sources for the real-world causes in Section 6.
 - [ ] Repeat the key results with more seeds before reporting them as findings.
