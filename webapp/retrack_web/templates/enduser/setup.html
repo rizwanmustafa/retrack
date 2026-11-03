@@ -1,0 +1,172 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, problem_list, csrf with context %}
+{% block title %}Session setup{% endblock %}
+{% block content %}
+{% call page_header('Session setup', 'Select a validated calibration, choose the input mode and start monitoring.') %}{% endcall %}
+
+{# Two-column layout from the Bootstrap 5.3 "Checkout" example: steps on the left, readiness summary on the right #}
+<div class="row g-5">
+  <div class="col-md-5 col-lg-4 order-md-last">
+    <h2 class="h5 d-flex justify-content-between align-items-center mb-3">
+      <span class="text-primary">Readiness</span>
+      {% if can_start %}<span class="badge bg-success rounded-pill">Ready</span>
+      {% else %}<span class="badge bg-secondary rounded-pill">Not ready</span>{% endif %}
+    </h2>
+    <ul class="list-group mb-3">
+      <li class="list-group-item d-flex justify-content-between lh-sm">
+        <div>
+          <h6 class="my-0">Calibration</h6>
+          <small class="text-body-secondary">{% if calibration %}{{ calibration._id }} · {{ calibration.cameraOrder|length }} cameras, {{ calibration.translationUnit }}{% else %}None selected{% endif %}</small>
+        </div>
+        {% if calibration %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}
+      </li>
+      <li class="list-group-item d-flex justify-content-between lh-sm">
+        <div>
+          <h6 class="my-0">Active checkpoint</h6>
+          <small class="text-body-secondary">{% if checkpoint %}{{ checkpoint._id }} · {{ checkpoint.modelName }} · {{ checkpoint.version }}{% else %}None — an Admin must select one{% endif %}</small>
+        </div>
+        {% if checkpoint %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}
+      </li>
+      <li class="list-group-item d-flex justify-content-between lh-sm">
+        <div>
+          <h6 class="my-0">Model instance</h6>
+          <small class="text-body-secondary">{% if busy %}Busy with another session{% else %}Available{% endif %}</small>
+        </div>
+        {% if not busy %}<i class="bi bi-check-circle-fill text-success"></i>{% else %}<i class="bi bi-x-circle-fill text-danger"></i>{% endif %}
+      </li>
+      <li class="list-group-item d-flex justify-content-between lh-sm bg-body-tertiary">
+        <div>
+          <h6 class="my-0">Camera order</h6>
+          <small class="text-body-secondary">{{ scene.CAMERA_ORDER|join(' · ') }}</small>
+        </div>
+      </li>
+    </ul>
+    <div class="alert alert-light border small mb-0">
+      <i class="bi bi-info-circle me-1"></i>Validation checks the structure and values of a calibration; it cannot
+      prove that it matches the physical scene. Uploading another calibration does not add support for a new site.
+    </div>
+  </div>
+
+  <div class="col-md-7 col-lg-8">
+    {% if upload_error %}
+      <div class="alert alert-danger" role="alert">
+        <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>{{ upload_error }}</div>
+        {{ problem_list(problems) }}
+      </div>
+    {% elif problems %}
+      <div class="alert alert-danger" role="alert">{{ problem_list(problems) }}</div>
+    {% endif %}
+
+    <h2 class="h4 mb-3"><span class="badge text-bg-primary rounded-pill me-2">1</span>Calibration</h2>
+    <ul class="nav nav-tabs" id="calibrationTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="select-tab" data-bs-toggle="tab" data-bs-target="#select-pane" type="button"
+                role="tab" aria-controls="select-pane" aria-selected="true">Select stored</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload-pane" type="button"
+                role="tab" aria-controls="upload-pane" aria-selected="false">Upload bundle</button>
+      </li>
+    </ul>
+    <div class="tab-content border border-top-0 rounded-bottom p-3 mb-4">
+      <div class="tab-pane fade show active" id="select-pane" role="tabpanel" aria-labelledby="select-tab" tabindex="0">
+        {% if stored %}
+        <form method="post" action="{{ url_for('enduser.select_calibration') }}">
+          {{ csrf() }}
+          <div class="list-group mb-3">
+            {% for c in stored %}
+              <label class="list-group-item d-flex gap-3">
+                <input class="form-check-input flex-shrink-0" type="radio" name="calibrationId" value="{{ c._id }}"
+                       {% if calibration and calibration._id == c._id %}checked{% endif %} required>
+                <span>
+                  <strong>{{ c._id }}</strong> {{ badge(c.validationStatus) }}
+                  {% if calibration and calibration._id == c._id %}<span class="badge text-bg-primary">Selected</span>{% endif %}
+                  <small class="d-block text-body-secondary">{{ c.calibrationFile }} · {{ c.coordinateConvention }}, {{ c.translationUnit }}
+                    · uploaded by {{ c.uploadedBy.username }} at {{ c.uploadedAt|iso }}</small>
+                </span>
+              </label>
+            {% endfor %}
+          </div>
+          <button class="btn btn-outline-primary" type="submit"><i class="bi bi-check2-square me-1"></i>Validate and select</button>
+        </form>
+        {% else %}
+          <p class="text-body-secondary mb-0">No calibration bundles are stored yet. Upload one.</p>
+        {% endif %}
+      </div>
+      <div class="tab-pane fade" id="upload-pane" role="tabpanel" aria-labelledby="upload-tab" tabindex="0">
+        <form method="post" action="{{ url_for('enduser.upload_calibration') }}" enctype="multipart/form-data"
+              class="needs-validation" novalidate>
+          {{ csrf() }}
+          <div class="mb-3">
+            <label for="bundle" class="form-label">Calibration bundle (.zip)</label>
+            <input class="form-control" type="file" id="bundle" name="bundle" accept=".zip,application/zip" required>
+            <div class="form-text">
+              <code>manifest.json</code> with <code>coordinateConvention: "{{ scene.COORDINATE_CONVENTION }}"</code> and
+              <code>translationUnit: "{{ scene.TRANSLATION_UNIT }}"</code>, plus <code>intrinsic_zero/intr_&lt;camera&gt;.xml</code>
+              and <code>extrinsic/extr_&lt;camera&gt;.xml</code> for each of the seven cameras.
+            </div>
+            <div class="invalid-feedback">Choose a .zip file.</div>
+          </div>
+          <button class="btn btn-outline-primary" type="submit"><i class="bi bi-upload me-1"></i>Upload and validate</button>
+        </form>
+      </div>
+    </div>
+
+    <h2 class="h4 mb-3"><span class="badge text-bg-primary rounded-pill me-2">2</span>Input mode</h2>
+    <form method="post" action="{{ url_for('enduser.start_session') }}" id="startForm">
+      {{ csrf() }}
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6">
+          <input type="radio" class="btn-check" name="inputMode" id="modeLive" value="LIVE" autocomplete="off" checked>
+          <label class="btn btn-outline-primary w-100 text-start p-3" for="modeLive">
+            <i class="bi bi-broadcast fs-4 d-block mb-1"></i><strong>LIVE</strong>
+            <small class="d-block">The camera rig pushes synchronized frame sets to this session.</small>
+          </label>
+        </div>
+        <div class="col-sm-6">
+          <input type="radio" class="btn-check" name="inputMode" id="modeRecorded" value="RECORDED" autocomplete="off">
+          <label class="btn btn-outline-primary w-100 text-start p-3" for="modeRecorded">
+            <i class="bi bi-film fs-4 d-block mb-1"></i><strong>RECORDED</strong>
+            <small class="d-block">Replay a configured recording in source order until it ends.</small>
+          </label>
+        </div>
+      </div>
+      <div class="mb-4" id="recordedSourceGroup" hidden>
+        <label for="recordedSource" class="form-label">Recorded source</label>
+        {% if sources %}
+          <select class="form-select" id="recordedSource" name="recordedSource">
+            {% for s in sources %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+          </select>
+        {% else %}
+          <div class="alert alert-warning py-2 small mb-0">No recorded sources are configured on this server.</div>
+        {% endif %}
+      </div>
+
+      <h2 class="h4 mb-3"><span class="badge text-bg-primary rounded-pill me-2">3</span>Start</h2>
+      <button class="btn btn-primary btn-lg" type="submit" id="startButton" {% if not can_start %}disabled{% endif %}
+              data-has-sources="{{ 'yes' if sources else 'no' }}">
+        <i class="bi bi-play-fill me-1"></i>Start monitoring
+      </button>
+      {% if not can_start %}
+        <p class="small text-body-secondary mt-2 mb-0">Start is unavailable until every readiness item is satisfied.</p>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const group = document.getElementById('recordedSourceGroup')
+  const start = document.getElementById('startButton')
+  const ready = !start.disabled
+  const sync = () => {
+    const recorded = document.getElementById('modeRecorded').checked
+    group.hidden = !recorded
+    start.disabled = !ready || (recorded && start.dataset.hasSources !== 'yes')
+  }
+  document.querySelectorAll('input[name="inputMode"]').forEach(r => r.addEventListener('change', sync))
+  sync()
+})()
+</script>
+{% endblock %}

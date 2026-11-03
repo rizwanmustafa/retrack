@@ -1,0 +1,78 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, empty_state, csrf with context %}
+{% block title %}Model checkpoints{% endblock %}
+{% block content %}
+{% call page_header('Model checkpoints', 'Trained checkpoints found in the configured checkpoint folder. Only compatible checkpoints can be activated.') %}{% endcall %}
+
+{% if busy %}
+  <div class="alert alert-warning" role="alert"><i class="bi bi-lock me-1"></i>The model instance is processing an active
+    session. The checkpoint cannot be changed until that session ends.</div>
+{% endif %}
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body d-flex align-items-center gap-3">
+    <i class="bi bi-cpu fs-2 text-primary"></i>
+    <div>
+      <div class="text-body-secondary small text-uppercase">Active for new sessions</div>
+      {% if active %}
+        <div class="fw-semibold">{{ active._id }} · {{ active.fileName }}</div>
+        <div class="small text-body-secondary">{{ active.modelName }} · {{ active.version }} · sha256 <span class="mono">{{ (active.sha256 or '')[:16] }}…</span></div>
+      {% else %}
+        <div class="fw-semibold text-danger">No checkpoint is active</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if checkpoints %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead><tr><th>Checkpoint</th><th>File</th><th>Model / version</th><th>Compatibility</th><th class="text-end"></th></tr></thead>
+    <tbody>
+    {% for c in checkpoints %}
+      <tr class="{% if c.isActive %}table-active{% endif %}">
+        <td>{{ c._id }} {% if c.isActive %}<span class="badge text-bg-primary">Active</span>{% endif %}
+          {% if not c.available %}<span class="badge text-bg-danger">Unavailable</span>{% endif %}</td>
+        <td class="small mono">{{ c.fileName }}<div class="text-body-secondary">{{ '%.1f'|format(c.sizeBytes / 1048576) }} MB</div></td>
+        <td class="small">{{ c.modelName or '—' }}<div class="text-body-secondary">{{ c.version or 'not inspected yet' }}</div></td>
+        <td class="small">
+          {% if c.lastInspection %}
+            {% if c.lastInspection.compatible %}
+              <span class="badge text-bg-success">Compatible</span>
+            {% else %}
+              <span class="badge text-bg-danger">Incompatible</span>
+              <ul class="mb-0 ps-3">{% for p in c.lastInspection.problems %}<li>{{ p }}</li>{% endfor %}</ul>
+            {% endif %}
+            <div class="text-body-secondary">checked {{ c.lastInspection.inspectedAt|iso }}</div>
+            {% if c.lastInspection.details %}
+              <a class="small" data-bs-toggle="collapse" href="#details-{{ c._id }}" role="button" aria-expanded="false">configuration</a>
+              <div class="collapse" id="details-{{ c._id }}">
+                <dl class="row mb-0 mt-1">{% for k, v in c.lastInspection.details.items() %}<dt class="col-6 fw-normal text-body-secondary">{{ k }}</dt><dd class="col-6 mb-0">{{ v }}</dd>{% endfor %}</dl>
+              </div>
+            {% endif %}
+          {% else %}
+            <span class="text-body-secondary">Checked when selected</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          {% if not c.isActive %}
+          <form method="post" action="{{ url_for('admin.select_checkpoint', checkpoint_id=c._id) }}">
+            {{ csrf() }}
+            <button class="btn btn-sm btn-outline-primary" type="submit" {% if busy or not c.available %}disabled{% endif %}
+                    data-confirm="Check {{ c.fileName }} for compatibility and make it active for new sessions? Loading the checkpoint can take a while."
+                    data-confirm-title="Select checkpoint" data-confirm-label="Check and activate">
+              <i class="bi bi-check2-circle me-1"></i>Select</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  {{ empty_state('boxes', 'No checkpoints found', 'Copy trained .ckpt files into the server\'s checkpoint folder (RETRACK_CHECKPOINT_DIR), then reload this page.') }}
+{% endif %}
+<p class="small text-body-secondary mt-3">Compatibility means: seven cameras, the configured WILDTRACK scene (BEV resolution and bounds),
+  a supported TrackTacular backend model, and weights that match the backend's output contract. A checkpoint is specific to its trained scene.</p>
+{% endblock %}

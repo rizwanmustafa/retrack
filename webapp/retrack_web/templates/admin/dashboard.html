@@ -1,0 +1,76 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, empty_state %}
+{% block title %}Admin dashboard{% endblock %}
+{% block content %}
+{% call page_header('Admin dashboard', 'Approvals, model configuration and diagnostics.') %}{% endcall %}
+
+<div class="row row-cols-1 row-cols-sm-2 row-cols-xl-4 g-3 mb-4">
+  <div class="col">
+    <a href="{{ url_for('admin.accounts_page') }}" class="card h-100 shadow-sm text-decoration-none">
+      <div class="card-body">
+        <div class="text-body-secondary small text-uppercase"><i class="bi bi-person-check me-1"></i>Pending accounts</div>
+        <div class="fs-2 fw-semibold">{{ pending_accounts }}</div>
+      </div>
+    </a>
+  </div>
+  <div class="col">
+    <a href="{{ url_for('admin.profile_requests') }}" class="card h-100 shadow-sm text-decoration-none">
+      <div class="card-body">
+        <div class="text-body-secondary small text-uppercase"><i class="bi bi-person-lines-fill me-1"></i>Pending profile requests</div>
+        <div class="fs-2 fw-semibold">{{ pending_requests }}</div>
+      </div>
+    </a>
+  </div>
+  <div class="col">
+    <a href="{{ url_for('admin.checkpoints_page') }}" class="card h-100 shadow-sm text-decoration-none">
+      <div class="card-body">
+        <div class="text-body-secondary small text-uppercase"><i class="bi bi-boxes me-1"></i>Active checkpoint</div>
+        {% if checkpoint %}
+          <div class="fs-5 fw-semibold">{{ checkpoint._id }}</div>
+          <div class="small text-body-secondary">{{ checkpoint.modelName }} · {{ checkpoint.version }}</div>
+        {% else %}
+          <div class="fs-5 fw-semibold text-danger">None</div>
+          <div class="small text-body-secondary">Sessions cannot start</div>
+        {% endif %}
+      </div>
+    </a>
+  </div>
+  <div class="col">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <div class="text-body-secondary small text-uppercase"><i class="bi bi-cpu me-1"></i>Model instance</div>
+        {% if active_session %}
+          <div class="fs-5 fw-semibold">Busy</div>
+          <div class="small text-body-secondary">Session <a href="{{ url_for('admin.session_detail', session_id=active_session._id) }}">{{ active_session._id }}</a> {{ badge(active_session.status) }}</div>
+        {% else %}
+          <div class="fs-5 fw-semibold text-success">Idle</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex justify-content-between align-items-center">
+  <h2 class="h5 mb-2">Recent errors</h2>
+  <a class="small" href="{{ url_for('admin.audit_log', errors='1') }}">All errors</a>
+</div>
+{% if recent_errors %}
+<div class="table-responsive">
+  <table class="table table-sm table-hover align-middle">
+    <thead><tr><th>Time (UTC)</th><th>Type</th><th>Resource</th><th>Details</th></tr></thead>
+    <tbody>
+    {% for r in recent_errors %}
+      <tr>
+        <td class="small mono timeline-time"><a href="{{ url_for('admin.audit_detail', log_id=r._id) }}">{{ r.timestamp|iso }}</a></td>
+        <td><span class="badge text-bg-danger-subtle text-danger-emphasis">{{ r.activityType }}</span></td>
+        <td class="small">{{ r.resource.type }} {{ r.resource.id or '' }}</td>
+        <td class="small text-truncate" style="max-width: 28rem">{{ r.details.reason or r.details.message or r.details.error or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  {{ empty_state('check2-circle', 'No errors recorded', 'Input faults, processing failures and failed report generations appear here.') }}
+{% endif %}
+{% endblock %}

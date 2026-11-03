@@ -1,0 +1,49 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, empty_state %}
+{% block title %}Profile requests{% endblock %}
+{% block content %}
+{% call page_header('Profile-update requests', 'Review requests and decide which fields each End User may change.') %}{% endcall %}
+
+<h2 class="h5">Pending <span class="badge text-bg-warning">{{ pending|length }}</span></h2>
+{% if pending %}
+<div class="list-group mb-5">
+  {% for r in pending %}
+    {% set u = users.get(r.userId) %}
+    <a href="{{ url_for('admin.profile_request_detail', request_id=r._id) }}" class="list-group-item list-group-item-action py-3">
+      <div class="d-flex w-100 justify-content-between">
+        <h3 class="h6 mb-1">{{ r._id }} · {{ u.username if u else r.userId }}</h3>
+        <small class="mono">{{ r.createdAt|iso }}</small>
+      </div>
+      <p class="mb-1 small">{% for f in r.fieldsToChange %}<span class="badge text-bg-light border me-1">{{ fields[f] }}</span>{% endfor %}</p>
+      <small class="text-body-secondary">{{ r.reason }}</small>
+    </a>
+  {% endfor %}
+</div>
+{% else %}
+  <div class="mb-5">{{ empty_state('inbox', 'No pending requests', 'Profile-update requests from End Users appear here.') }}</div>
+{% endif %}
+
+<h2 class="h5">Recently decided</h2>
+{% if decided %}
+<div class="table-responsive">
+  <table class="table table-sm table-striped align-middle">
+    <thead><tr><th>Request</th><th>User</th><th>Status</th><th>Permitted fields</th><th>Decided by</th><th>Decided (UTC)</th></tr></thead>
+    <tbody>
+    {% for r in decided %}
+      {% set u = users.get(r.userId) %}
+      <tr>
+        <td><a href="{{ url_for('admin.profile_request_detail', request_id=r._id) }}">{{ r._id }}</a></td>
+        <td>{{ u.username if u else r.userId }}</td>
+        <td>{{ badge(r.status) }}</td>
+        <td class="small">{% for f in r.permittedFields %}{{ fields[f] }}{{ ', ' if not loop.last }}{% else %}—{% endfor %}</td>
+        <td>{{ r.reviewedBy.adminUsername if r.reviewedBy else '—' }}</td>
+        <td class="small mono">{{ r.decidedAt|iso }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  <p class="text-body-secondary small">No decisions yet.</p>
+{% endif %}
+{% endblock %}

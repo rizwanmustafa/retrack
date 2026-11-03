@@ -1,0 +1,66 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, csrf with context %}
+{% block title %}Request {{ req._id }}{% endblock %}
+{% block content %}
+{% call page_header('Profile-update request ' ~ req._id) %}
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.profile_requests') }}"><i class="bi bi-arrow-left me-1"></i>Back to queue</a>
+{% endcall %}
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Requester: <strong>{{ user.username if user else req.userId }}</strong> ({{ req.userId }})</span>
+        {{ badge(req.status) }}
+      </div>
+      <div class="card-body">
+        <h2 class="h6">Reason</h2>
+        <p class="border rounded p-2 bg-body-tertiary">{{ req.reason }}</p>
+        <h2 class="h6">Requested fields and current values</h2>
+        <table class="table table-sm">
+          <thead><tr><th>Field</th><th>Current value</th></tr></thead>
+          <tbody>
+          {% for f in req.fieldsToChange %}
+            <tr><td>{{ fields[f] }}</td><td>{{ user[f] if user else '—' }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <p class="small text-body-secondary mb-0">Submitted {{ req.createdAt|iso }}.
+          {% if req.decidedAt %}Decided {{ req.decidedAt|iso }} by {{ req.reviewedBy.adminUsername }}.{% endif %}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    {% if req.status == 'Pending' %}
+    <div class="card shadow-sm border-primary">
+      <div class="card-header">Decision</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('admin.decide_profile_request', request_id=req._id) }}">
+          {{ csrf() }}
+          <fieldset class="mb-3">
+            <legend class="form-label fs-6">Permitted fields (for approval)</legend>
+            {% for f in req.fieldsToChange %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="permittedFields" value="{{ f }}" id="perm-{{ f }}" checked>
+                <label class="form-check-label" for="perm-{{ f }}">{{ fields[f] }}</label>
+              </div>
+            {% endfor %}
+            <div class="form-text">The approval allows one update of the selected fields.</div>
+          </fieldset>
+          <div class="d-flex gap-2">
+            <button class="btn btn-success" name="decision" value="approve"
+                    data-confirm="Approve request {{ req._id }} for the selected fields?" data-confirm-title="Approve request"
+                    data-confirm-class="btn-success" data-confirm-label="Approve"><i class="bi bi-check-lg"></i> Approve</button>
+            <button class="btn btn-outline-danger" name="decision" value="reject"
+                    data-confirm="Reject request {{ req._id }}? The End User will see the Rejected status." data-confirm-title="Reject request"
+                    data-confirm-class="btn-danger" data-confirm-label="Reject"><i class="bi bi-x-lg"></i> Reject</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <div class="alert alert-light border">This request was already decided ({{ req.status }}).
+      {% if req.permittedFields %}Permitted: {% for f in req.permittedFields %}{{ fields[f] }}{{ ', ' if not loop.last }}{% endfor %}.{% endif %}</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,4 @@
+# Inference environment for the TrackTacular backend (WorldTrack/). Install a CUDA build of torch/torchvision
+# that matches the GPU host first (https://pytorch.org/get-started/locally/), then:
+-r requirements.txt
+-r ../requirements-colab.txt

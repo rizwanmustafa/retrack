@@ -1,0 +1,55 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, empty_state, csrf with context %}
+{% block title %}Account approvals{% endblock %}
+{% block content %}
+{% call page_header('Account approvals', 'Approve or reject Pending End User registrations. Each registration is decided once.') %}{% endcall %}
+
+<h2 class="h5">Pending registrations <span class="badge text-bg-warning">{{ pending|length }}</span></h2>
+{% if pending %}
+<div class="table-responsive mb-5">
+  <table class="table table-hover align-middle">
+    <thead><tr><th>Account</th><th>Name</th><th>Username</th><th>Email</th><th>Registered (UTC)</th><th class="text-end">Decision</th></tr></thead>
+    <tbody>
+    {% for u in pending %}
+      <tr>
+        <td>{{ u._id }}</td><td>{{ u.name }}</td><td>{{ u.username }}</td><td>{{ u.email }}</td>
+        <td class="small mono">{{ u.createdAt|iso }}</td>
+        <td class="text-end text-nowrap">
+          <form method="post" action="{{ url_for('admin.decide_account', user_id=u._id) }}" class="d-inline">
+            {{ csrf() }}
+            <button class="btn btn-sm btn-success" name="decision" value="approve"
+                    data-confirm="Approve {{ u.username }}? The account becomes Active and can sign in."
+                    data-confirm-title="Approve account" data-confirm-class="btn-success" data-confirm-label="Approve">
+              <i class="bi bi-check-lg"></i> Approve</button>
+            <button class="btn btn-sm btn-outline-danger" name="decision" value="reject"
+                    data-confirm="Reject {{ u.username }}? The account becomes Rejected and cannot sign in. This decision is final."
+                    data-confirm-title="Reject account" data-confirm-class="btn-danger" data-confirm-label="Reject">
+              <i class="bi bi-x-lg"></i> Reject</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  <div class="mb-5">{{ empty_state('person-check', 'No pending registrations', 'New End User registrations appear here.') }}</div>
+{% endif %}
+
+<h2 class="h5">Recent decisions</h2>
+{% if decided %}
+<div class="table-responsive">
+  <table class="table table-sm table-striped align-middle">
+    <thead><tr><th>Account</th><th>Username</th><th>Status</th><th>Decided by</th><th>Decided (UTC)</th></tr></thead>
+    <tbody>
+    {% for u in decided %}
+      <tr><td>{{ u._id }}</td><td>{{ u.username }}</td><td>{{ badge(u.accountStatus) }}</td>
+        <td>{{ u.decision.adminUsername }}</td><td class="small mono">{{ u.decision.decidedAt|iso }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  <p class="text-body-secondary small">No decisions yet.</p>
+{% endif %}
+{% endblock %}

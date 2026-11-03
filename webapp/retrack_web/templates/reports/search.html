@@ -1,0 +1,64 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, empty_state %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+{% call page_header('Reports', 'Your own sessions\' reports' if not principal.is_admin else 'All session reports') %}{% endcall %}
+
+<form class="row g-2 align-items-end mb-4" method="get" action="{{ url_for('reports.search') }}">
+  <div class="col-md-4">
+    <label for="sessionId" class="form-label small">Session identifier</label>
+    <input type="text" class="form-control" id="sessionId" name="sessionId" placeholder="e.g. S-000012"
+           value="{{ args.get('sessionId', '') }}">
+  </div>
+  <div class="col-sm-6 col-md-3">
+    <label for="from" class="form-label small">Generated from (UTC)</label>
+    <input type="date" class="form-control{% if error %} is-invalid{% endif %}" id="from" name="from" value="{{ args.get('from', '') }}">
+  </div>
+  <div class="col-sm-6 col-md-3">
+    <label for="to" class="form-label small">Generated to (UTC, inclusive)</label>
+    <input type="date" class="form-control{% if error %} is-invalid{% endif %}" id="to" name="to" value="{{ args.get('to', '') }}">
+  </div>
+  <div class="col-md-2 d-grid">
+    <button class="btn btn-primary" type="submit"><i class="bi bi-search me-1"></i>Search</button>
+  </div>
+</form>
+
+{% if error %}
+  <div class="alert alert-danger" role="alert"><i class="bi bi-calendar-x me-1"></i>{{ error }}</div>
+{% elif results %}
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead>
+        <tr><th>Report</th><th>Session</th>{% if principal.is_admin %}<th>Owner</th>{% endif %}<th>Status</th>
+          <th>Session status</th><th>Type</th><th>Generated (UTC)</th><th class="text-end">Frames</th><th></th></tr>
+      </thead>
+      <tbody>
+      {% for r in results %}
+        <tr>
+          <td><a href="{{ url_for('reports.detail', report_id=r._id) }}">{{ r._id }}</a></td>
+          <td>{{ r.sessionId }}</td>
+          {% if principal.is_admin %}<td>{{ r.ownerUsername }}</td>{% endif %}
+          <td>{{ badge(r.status) }}</td>
+          <td>{{ badge(r.sessionStatus) }}{% if r.sessionStatus == 'Failed' %} <span class="badge text-bg-danger-subtle text-danger-emphasis">partial</span>{% endif %}</td>
+          <td>{{ badge(r.reportType) }}</td>
+          <td class="small mono">{{ r.generatedAt|iso }}</td>
+          <td class="text-end">{{ r.summary.framesProcessed if r.summary else '—' }}</td>
+          <td class="text-end text-nowrap">
+            {% if r.status == 'Available' %}
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('reports.download', report_id=r._id, fmt='pdf') }}"><i class="bi bi-filetype-pdf"></i> PDF</a>
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('reports.download', report_id=r._id, fmt='csv') }}"><i class="bi bi-filetype-csv"></i> CSV</a>
+            {% else %}
+              <span class="small text-body-secondary">unavailable</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% elif searched %}
+  {{ empty_state('search', 'No matching reports', 'No report you may access matches this session identifier and date range.') }}
+{% else %}
+  {{ empty_state('file-earmark-bar-graph', 'No reports yet', 'Reports appear here once a session with processed frame sets is finalized.') }}
+{% endif %}
+{% endblock %}

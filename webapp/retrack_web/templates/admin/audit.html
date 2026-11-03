@@ -1,0 +1,65 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, empty_state, pagination %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+{% call page_header('Audit log & system errors', total ~ ' matching records') %}{% endcall %}
+
+<form class="row g-2 align-items-end mb-3" method="get" action="{{ url_for('admin.audit_log') }}">
+  <div class="col-md-3">
+    <label for="type" class="form-label small">Type</label>
+    <select class="form-select" id="type" name="type">
+      <option value="">All types</option>
+      {% for group, types in groups.items() %}
+        <optgroup label="{{ group }}">
+          <option value="{{ group }}" {% if args.get('type') == group %}selected{% endif %}>All {{ group|lower }}</option>
+          {% for t in types %}<option value="{{ t }}" {% if args.get('type') == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+        </optgroup>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <label for="resource" class="form-label small">Resource ID</label>
+    <input class="form-control" id="resource" name="resource" placeholder="e.g. S-000003" value="{{ args.get('resource', '') }}">
+  </div>
+  <div class="col-sm-6 col-md-2">
+    <label for="from" class="form-label small">From (UTC)</label>
+    <input type="date" class="form-control{% if error %} is-invalid{% endif %}" id="from" name="from" value="{{ args.get('from', '') }}">
+  </div>
+  <div class="col-sm-6 col-md-2">
+    <label for="to" class="form-label small">To (UTC)</label>
+    <input type="date" class="form-control{% if error %} is-invalid{% endif %}" id="to" name="to" value="{{ args.get('to', '') }}">
+  </div>
+  <div class="col-md-1">
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" value="1" id="errors" name="errors" {% if args.get('errors') == '1' %}checked{% endif %}>
+      <label class="form-check-label small" for="errors">Errors</label>
+    </div>
+  </div>
+  <div class="col-md-2 d-grid"><button class="btn btn-primary" type="submit"><i class="bi bi-funnel me-1"></i>Filter</button></div>
+</form>
+
+{% if error %}
+  <div class="alert alert-danger" role="alert">{{ error }}</div>
+{% elif records %}
+<div class="table-responsive">
+  <table class="table table-sm table-hover align-middle">
+    <thead><tr><th>Time (UTC)</th><th>Activity</th><th>Actor</th><th>Resource</th><th>Outcome</th><th></th></tr></thead>
+    <tbody>
+    {% for r in records %}
+      <tr>
+        <td class="small mono timeline-time">{{ r.timestamp|iso }}</td>
+        <td class="small">{% if r.errorFlag %}<i class="bi bi-exclamation-octagon-fill text-danger me-1" title="Error"></i>{% endif %}<span class="activity">{{ r.activityType }}</span></td>
+        <td class="small">{{ r.performedBy.username }} <span class="text-body-secondary">({{ r.performedBy.type|replace('_', ' ')|lower }})</span></td>
+        <td class="small">{{ r.resource.type }} {{ r.resource.id or '' }}</td>
+        <td>{{ badge(r.outcome) }}</td>
+        <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.audit_detail', log_id=r._id) }}">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ pagination(page, pages, 'admin.audit_log', args) }}
+{% else %}
+  {{ empty_state('journal-x', 'No matching records', 'No audit or diagnostic record matches these filters.') }}
+{% endif %}
+{% endblock %}

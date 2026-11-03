@@ -1,0 +1,72 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, field_error, invalid, csrf with context %}
+{% block title %}Profile{% endblock %}
+{% block content %}
+{% call page_header('Profile', 'Changes need an approved profile-update request; each approval can be used once.') %}
+  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('enduser.profile_requests') }}"><i class="bi bi-pencil-square me-1"></i>Request profile update</a>
+{% endcall %}
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    {% if message %}
+      <div class="alert alert-danger" role="alert"><i class="bi bi-exclamation-triangle me-1"></i>{{ message }}</div>
+    {% endif %}
+    {% if approval %}
+      <div class="alert alert-success" role="alert">
+        <i class="bi bi-unlock me-1"></i>Request <strong>{{ approval._id }}</strong> is approved. You can change:
+        {% for f in approval.permittedFields %}<span class="badge text-bg-success ms-1">{{ fields[f] }}</span>{% endfor %}
+      </div>
+    {% else %}
+      <div class="alert alert-secondary" role="alert">
+        <i class="bi bi-lock me-1"></i>Your profile is read-only. To change it,
+        <a href="{{ url_for('enduser.profile_requests') }}" class="alert-link">request a profile update</a>.
+      </div>
+    {% endif %}
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <form method="post" action="{{ url_for('enduser.profile') }}" class="needs-validation" novalidate>
+          {{ csrf() }}
+          {% for key, label in fields.items() %}
+            {% set editable = approval and key in approval.permittedFields %}
+            <div class="mb-3">
+              <label for="{{ key }}" class="form-label">{{ label }}
+                {% if editable %}<span class="badge text-bg-success">editable</span>{% endif %}</label>
+              <input type="{{ 'email' if key == 'email' else 'text' }}" class="form-control{{ invalid(errors, key) }}"
+                     id="{{ key }}" {% if editable %}name="{{ key }}" required{% else %}disabled readonly{% endif %}
+                     value="{{ form.get(key) if (form and editable and form.get(key) is not none) else account[key] }}">
+              {{ field_error(errors, key) }}
+            </div>
+          {% endfor %}
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label class="form-label">Role</label>
+              <input class="form-control" value="End User" disabled readonly>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Account status</label>
+              <div class="form-control border-0 ps-0">{{ badge(account.accountStatus) }}</div>
+            </div>
+          </div>
+          <div class="form-text mb-3">Role and account status cannot be changed through a profile update.</div>
+          {% if approval %}
+            <button class="btn btn-primary" type="submit"><i class="bi bi-save me-1"></i>Save changes</button>
+          {% endif %}
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-body small">
+        <h2 class="h6">How profile changes work</h2>
+        <ol class="mb-0 ps-3">
+          <li>Request a change, naming the fields and the reason.</li>
+          <li>An Admin approves or rejects the request.</li>
+          <li>After approval, only the approved fields become editable here.</li>
+          <li>A successful save marks the request <strong>Used</strong>. An invalid save changes nothing and keeps the approval.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

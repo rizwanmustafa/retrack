@@ -1,0 +1,17 @@
+{% extends 'layouts/base.html' %}
+{% from '_macros.html' import flashes with context %}
+{# Layout adapted from the official Bootstrap 5.3 "Sign-in" example #}
+{% block body_class %}d-flex align-items-center py-4 bg-body-tertiary public-page{% endblock %}
+{% block body %}
+<div class="position-fixed top-0 end-0 m-3">{% include 'partials/theme_toggle.html' %}</div>
+<main class="{% block main_class %}form-signin{% endblock %} w-100 m-auto">
+  <div class="text-center mb-4">
+    <i class="bi bi-bounding-box-circles fs-1 text-primary"></i>
+    <div class="fw-semibold">Retrack</div>
+    <div class="small text-body-secondary">Multi-camera pedestrian detection and tracking</div>
+  </div>
+  {{ flashes() }}
+  {% block content %}{% endblock %}
+  <p class="mt-5 mb-3 text-body-secondary text-center small">Retrack · FAST-NUCES Chiniot-Faisalabad · Final Year Project</p>
+</main>
+{% endblock %}

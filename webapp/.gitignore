@@ -1,0 +1,5 @@
+.venv/
+instance/*
+!instance/recorded_sources.example.json
+.pytest_cache/
+__pycache__/

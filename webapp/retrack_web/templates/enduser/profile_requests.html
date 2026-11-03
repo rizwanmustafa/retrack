@@ -1,0 +1,71 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, field_error, empty_state, csrf with context %}
+{% block title %}Profile requests{% endblock %}
+{% block content %}
+{% call page_header('Profile-update requests', 'Ask the Admin for permission to change specific profile fields.') %}{% endcall %}
+<div class="row g-4">
+  <div class="col-lg-5 order-lg-last">
+    <div class="card shadow-sm">
+      <div class="card-header"><i class="bi bi-plus-circle me-1"></i>New request</div>
+      <div class="card-body">
+        {% if open_request %}
+          <p class="mb-0 small">Request <strong>{{ open_request._id }}</strong> is {{ badge(open_request.status) }}.
+            {% if open_request.status == 'Approved' %}<a href="{{ url_for('enduser.profile') }}">Edit your profile</a> to use it.
+            {% else %}Wait for the Admin's decision before submitting another request.{% endif %}</p>
+        {% else %}
+          {% if message %}<div class="alert alert-danger py-2 small">{{ message }}</div>{% endif %}
+          <form method="post" action="{{ url_for('enduser.profile_requests') }}" novalidate>
+            {{ csrf() }}
+            <fieldset class="mb-3">
+              <legend class="form-label fs-6">Fields to change</legend>
+              {% for key, label in fields.items() %}
+                <div class="form-check">
+                  <input class="form-check-input{% if errors.get('fields') %} is-invalid{% endif %}" type="checkbox"
+                         name="fields" value="{{ key }}" id="field-{{ key }}" {% if key in form.getlist('fields') %}checked{% endif %}>
+                  <label class="form-check-label" for="field-{{ key }}">{{ label }}</label>
+                </div>
+              {% endfor %}
+              {{ field_error(errors, 'fields') }}
+              <div class="form-text">Role and account status cannot be requested.</div>
+            </fieldset>
+            <div class="mb-3">
+              <label for="reason" class="form-label">Reason</label>
+              <textarea class="form-control{% if errors.get('reason') %} is-invalid{% endif %}" id="reason" name="reason"
+                        rows="3" maxlength="1000">{{ form.get('reason', '') }}</textarea>
+              {{ field_error(errors, 'reason') }}
+            </div>
+            <button class="btn btn-primary" type="submit"><i class="bi bi-send me-1"></i>Submit request</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    {% if requests %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>Request</th><th>Fields</th><th>Status</th><th>Submitted (UTC)</th><th>Decision</th></tr></thead>
+        <tbody>
+        {% for r in requests %}
+          <tr>
+            <td>{{ r._id }}<div class="small text-body-secondary text-truncate" style="max-width: 16rem" title="{{ r.reason }}">{{ r.reason }}</div></td>
+            <td>{% for f in r.fieldsToChange %}<span class="badge text-bg-light border me-1">{{ fields[f] }}</span>{% endfor %}</td>
+            <td>{{ badge(r.status) }}</td>
+            <td class="small mono">{{ r.createdAt|iso }}</td>
+            <td class="small">
+              {% if r.decidedAt %}{{ r.decidedAt|iso }}
+                {% if r.permittedFields %}<div>Permitted: {% for f in r.permittedFields %}{{ fields[f] }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+                {% if r.usedAt %}<div>Used {{ r.usedAt|iso }}</div>{% endif %}
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      {{ empty_state('pencil-square', 'No requests yet', 'Submit a request to change your name, username or email.') }}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,121 @@
+{% set BADGES = {
+  'Pending': 'text-bg-warning', 'Active': 'text-bg-success', 'Rejected': 'text-bg-danger',
+  'Approved': 'text-bg-success', 'Used': 'text-bg-secondary',
+  'Initializing': 'text-bg-info', 'Running': 'text-bg-primary', 'Completed': 'text-bg-success', 'Failed': 'text-bg-danger',
+  'Generating': 'text-bg-info', 'Available': 'text-bg-success',
+  'SUCCESS': 'text-bg-success', 'FAILURE': 'text-bg-danger', 'REFUSED': 'text-bg-warning',
+  'Valid': 'text-bg-success', 'AUTOMATIC': 'text-bg-light border', 'MANUAL': 'text-bg-light border',
+  'LIVE': 'text-bg-dark', 'RECORDED': 'text-bg-secondary'
+} %}
+
+{% macro badge(status) -%}
+  <span class="badge rounded-pill {{ BADGES.get(status, 'text-bg-secondary') }}">{{ status }}</span>
+{%- endmacro %}
+
+{% set RUNTIME = {
+  'INITIALIZING': ('text-bg-info', 'hourglass-split', 'Initializing'),
+  'WAITING_FOR_INPUT': ('text-bg-secondary', 'hourglass', 'Waiting for input'),
+  'PROCESSING': ('text-bg-primary', 'cpu', 'Processing'),
+  'PAUSED_MISSING_CAMERA': ('text-bg-warning', 'pause-circle', 'Paused: missing camera'),
+  'STOPPING': ('text-bg-info', 'stop-circle', 'Stopping'),
+  'FINALIZED': ('text-bg-light border', 'flag', 'Finalized'),
+  'Initializing': ('text-bg-info', 'hourglass-split', 'Initializing')
+} %}
+
+{% macro runtime_badge(runtime) -%}
+  {% set r = RUNTIME.get(runtime, ('text-bg-secondary', 'circle', runtime)) %}
+  <span class="badge {{ r[0] }}"><i class="bi bi-{{ r[1] }} me-1"></i>{{ r[2] }}</span>
+{%- endmacro %}
+
+{% macro flashes() -%}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    {% endfor %}
+  {% endwith %}
+{%- endmacro %}
+
+{% macro page_header(title, subtitle=None) -%}
+  <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <div>
+      <h1 class="h2 mb-0">{{ title }}</h1>
+      {% if subtitle %}<p class="text-body-secondary mb-0 small">{{ subtitle }}</p>{% endif %}
+    </div>
+    <div class="btn-toolbar mb-2 mb-md-0">{{ caller() if caller }}</div>
+  </div>
+{%- endmacro %}
+
+{% macro field_error(errors, name) -%}
+  {% if errors and errors.get(name) %}<div class="invalid-feedback d-block">{{ errors[name] }}</div>{% endif %}
+{%- endmacro %}
+
+{% macro invalid(errors, name) -%}{% if errors and errors.get(name) %} is-invalid{% endif %}{%- endmacro %}
+
+{% macro problem_list(problems) -%}
+  {% if problems %}
+  <ul class="list-group list-group-flush small mt-2">
+    {% for p in problems %}
+      <li class="list-group-item bg-transparent px-0">
+        <i class="bi bi-x-circle text-danger me-1"></i>
+        {% if p.camera %}<span class="badge text-bg-dark me-1">{{ p.camera }}</span>{% endif %}
+        {% if p.file %}<code class="me-1">{{ p.file }}</code>{% endif %}
+        {% if p.field and not p.file %}<span class="fw-semibold me-1">{{ p.field }}:</span>{% endif %}
+        {% if p.field and p.file %}<span class="text-body-secondary me-1">[{{ p.field }}]</span>{% endif %}
+        {{ p.reason or p.message }}
+      </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+{%- endmacro %}
+
+{% macro empty_state(icon, title, text) -%}
+  <div class="text-center text-body-secondary py-5 border rounded-3 bg-body-tertiary">
+    <i class="bi bi-{{ icon }} fs-1 d-block mb-2"></i>
+    <p class="fw-semibold mb-1">{{ title }}</p>
+    <p class="small mb-0">{{ text }}</p>
+  </div>
+{%- endmacro %}
+
+{% macro csrf() -%}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{%- endmacro %}
+
+{% macro summary_cards(summary) -%}
+  <div class="row row-cols-2 row-cols-lg-4 g-3">
+    {% for key, label, help in [
+      ('framesProcessed', 'Frames processed', 'Committed processed frame sets'),
+      ('uniqueTracks', 'Unique tracks', 'Session-local track IDs, not unique real people'),
+      ('meanOccupancy', 'Mean occupancy', 'Observed tracks per processed frame set'),
+      ('peakOccupancy', 'Peak occupancy', 'Most observed tracks in one frame set')] %}
+      <div class="col">
+        <div class="card h-100 shadow-sm">
+          <div class="card-body">
+            <div class="text-body-secondary small text-uppercase">{{ label }}</div>
+            <div class="fs-3 fw-semibold">
+              {%- if key == 'meanOccupancy' %}{{ '%.3f'|format(summary[key]) }}{% else %}{{ summary[key] }}{% endif -%}
+            </div>
+            <div class="small text-body-secondary">{{ help }}</div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
+{% macro pagination(page, pages, endpoint, args) -%}
+  {% if pages > 1 %}
+  <nav aria-label="Pages">
+    <ul class="pagination pagination-sm justify-content-center">
+      {% set base = args.to_dict() if args.to_dict else args %}
+      <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for(endpoint, **dict(base, page=page - 1)) }}">Previous</a>
+      </li>
+      <li class="page-item disabled"><span class="page-link">Page {{ page }} of {{ pages }}</span></li>
+      <li class="page-item {% if page >= pages %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for(endpoint, **dict(base, page=page + 1)) }}">Next</a>
+      </li>
+    </ul>
+  </nav>
+  {% endif %}
+{%- endmacro %}

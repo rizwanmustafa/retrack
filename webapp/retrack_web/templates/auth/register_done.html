@@ -1,0 +1,15 @@
+{% extends 'layouts/public.html' %}
+{% from '_macros.html' import badge %}
+{% block title %}Registration received{% endblock %}
+{% block main_class %}form-register{% endblock %}
+{% block content %}
+<div class="card shadow-sm text-center">
+  <div class="card-body p-4">
+    <i class="bi bi-hourglass-split fs-1 text-warning"></i>
+    <h1 class="h4 mt-2">Registration received</h1>
+    <p class="mb-2">Account <strong>{{ user.username }}</strong> was created with status {{ badge(user.accountStatus) }}.</p>
+    <p class="text-body-secondary small">It is waiting for Admin approval. You can sign in once an Admin approves it.</p>
+    <a class="btn btn-outline-primary" href="{{ url_for('auth.login') }}">Go to sign in</a>
+  </div>
+</div>
+{% endblock %}

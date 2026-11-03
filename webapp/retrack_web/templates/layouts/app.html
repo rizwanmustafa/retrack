@@ -1,0 +1,108 @@
+{% extends 'layouts/base.html' %}
+{% from '_macros.html' import flashes, csrf with context %}
+{# Layout adapted from the official Bootstrap 5.3 "Dashboard" example (navbar + offcanvas sidebar) #}
+{% macro nav_link(endpoint, icon, label, prefix=None) -%}
+  {% set active = request.endpoint == endpoint or (prefix and request.endpoint and request.endpoint.startswith(prefix)) %}
+  <li class="nav-item">
+    <a class="nav-link d-flex align-items-center gap-2 {% if active %}active{% endif %}"
+       {% if active %}aria-current="page"{% endif %} href="{{ url_for(endpoint) }}">
+      <i class="bi bi-{{ icon }}"></i>{{ label }}
+    </a>
+  </li>
+{%- endmacro %}
+
+{% block body %}
+<header class="navbar sticky-top bg-dark flex-md-nowrap p-0 shadow" data-bs-theme="dark">
+  <a class="navbar-brand col-md-3 col-lg-2 me-0 px-3 fs-6 text-white" href="{{ url_for('auth.index') }}">
+    <i class="bi bi-bounding-box-circles me-1"></i>Retrack
+  </a>
+  <div class="d-none d-md-flex align-items-center ms-auto me-3 text-white-50 small gap-3">
+    <span><i class="bi bi-person-circle me-1"></i>{{ principal.username }}
+      <span class="badge text-bg-secondary ms-1">{{ principal.role_label }}</span></span>
+    {% include 'partials/theme_toggle.html' %}
+  </div>
+  <ul class="navbar-nav flex-row d-md-none">
+    <li class="nav-item text-nowrap">
+      <button class="nav-link px-3 text-white" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebarMenu"
+              aria-controls="sidebarMenu" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+    </li>
+  </ul>
+</header>
+
+<div class="container-fluid">
+  <div class="row">
+    <div class="sidebar border border-right col-md-3 col-lg-2 p-0 bg-body-tertiary">
+      <div class="offcanvas-md offcanvas-end bg-body-tertiary" tabindex="-1" id="sidebarMenu"
+           aria-labelledby="sidebarMenuLabel">
+        <div class="offcanvas-header">
+          <h5 class="offcanvas-title" id="sidebarMenuLabel">Retrack</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#sidebarMenu"
+                  aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body d-md-flex flex-column p-0 pt-lg-3 overflow-y-auto">
+          {% if principal.is_admin %}
+            <ul class="nav flex-column">
+              {{ nav_link('admin.dashboard', 'speedometer2', 'Dashboard') }}
+            </ul>
+            <h6 class="sidebar-heading d-flex px-3 mt-4 mb-1 text-body-secondary text-uppercase">Decisions</h6>
+            <ul class="nav flex-column">
+              {{ nav_link('admin.accounts_page', 'person-check', 'Account approvals') }}
+              {{ nav_link('admin.profile_requests', 'person-lines-fill', 'Profile requests', 'admin.profile_request') }}
+            </ul>
+            <h6 class="sidebar-heading d-flex px-3 mt-4 mb-1 text-body-secondary text-uppercase">Configuration</h6>
+            <ul class="nav flex-column">
+              {{ nav_link('admin.checkpoints_page', 'boxes', 'Model checkpoints') }}
+            </ul>
+            <h6 class="sidebar-heading d-flex px-3 mt-4 mb-1 text-body-secondary text-uppercase">Records</h6>
+            <ul class="nav flex-column">
+              {{ nav_link('reports.search', 'file-earmark-bar-graph', 'Reports', 'reports.') }}
+              {{ nav_link('admin.sessions', 'collection', 'Sessions', 'admin.session') }}
+              {{ nav_link('admin.audit_log', 'journal-text', 'Audit log & errors', 'admin.audit') }}
+            </ul>
+          {% else %}
+            <ul class="nav flex-column">
+              {{ nav_link('enduser.dashboard', 'speedometer2', 'Dashboard') }}
+            </ul>
+            <h6 class="sidebar-heading d-flex px-3 mt-4 mb-1 text-body-secondary text-uppercase">Monitoring</h6>
+            <ul class="nav flex-column">
+              {{ nav_link('enduser.setup', 'sliders', 'Session setup') }}
+              {{ nav_link('enduser.sessions', 'collection-play', 'My sessions', 'enduser.session') }}
+            </ul>
+            <h6 class="sidebar-heading d-flex px-3 mt-4 mb-1 text-body-secondary text-uppercase">Records</h6>
+            <ul class="nav flex-column">
+              {{ nav_link('reports.search', 'file-earmark-bar-graph', 'Reports', 'reports.') }}
+            </ul>
+            <h6 class="sidebar-heading d-flex px-3 mt-4 mb-1 text-body-secondary text-uppercase">Account</h6>
+            <ul class="nav flex-column">
+              {{ nav_link('enduser.profile', 'person-vcard', 'Profile') }}
+              {{ nav_link('enduser.profile_requests', 'pencil-square', 'Profile requests') }}
+            </ul>
+          {% endif %}
+          <hr class="my-3">
+          <ul class="nav flex-column mb-auto">
+            <li class="nav-item d-md-none px-3 small text-body-secondary mb-2">
+              Signed in as {{ principal.username }} ({{ principal.role_label }})
+            </li>
+            <li class="nav-item">
+              <form method="post" action="{{ url_for('auth.logout') }}">
+                {{ csrf() }}
+                <button type="submit" class="nav-link d-flex align-items-center gap-2 btn btn-link text-start w-100">
+                  <i class="bi bi-door-closed"></i>Log out
+                </button>
+              </form>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 pb-5">
+      <div class="pt-3">{{ flashes() }}</div>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% include 'partials/confirm_modal.html' %}
+{% endblock %}

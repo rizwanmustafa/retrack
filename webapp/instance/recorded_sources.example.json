@@ -1,0 +1,15 @@
+{
+  "sources": [
+    {
+      "id": "wildtrack-test",
+      "name": "WILDTRACK test split (frames 1800-1995)",
+      "path": "/data/Wildtrack/Image_subsets",
+      "cameraFolders": {"CVLab1": "C1", "CVLab2": "C2", "CVLab3": "C3", "CVLab4": "C4",
+                        "IDIAP1": "C5", "IDIAP2": "C6", "IDIAP3": "C7"},
+      "frameRate": 10,
+      "startTime": "2017-01-01T00:00:00Z",
+      "frameRange": [1800, 1995],
+      "replayRate": 0
+    }
+  ]
+}

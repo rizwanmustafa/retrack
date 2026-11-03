@@ -1,0 +1,103 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, summary_cards, csrf with context %}
+{% block title %}Session {{ session._id }}{% endblock %}
+{% block content %}
+{% call page_header('Session ' ~ session._id, session.inputMode ~ ' · ' ~ (session.feed.source.name if session.feed else '')) %}
+  {% if not principal.is_admin and session.status in ('Initializing', 'Running') %}
+    <a class="btn btn-sm btn-primary" href="{{ url_for('enduser.live', session_id=session._id) }}"><i class="bi bi-broadcast me-1"></i>Live view</a>
+  {% endif %}
+{% endcall %}
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+  {{ badge(session.status) }} {{ badge(session.inputMode) }}
+  {% if session.endReason %}<span class="badge text-bg-light border">ended: {{ session.endReason|replace('_', ' ')|lower }}</span>{% endif %}
+</div>
+
+{% if session.status == 'Failed' and session.failure %}
+  <div class="alert alert-danger" role="alert">
+    <i class="bi bi-x-octagon me-1"></i><strong>Session failed</strong> during {{ session.failure.stage }}: {{ session.failure.message }}
+    {% if session.framesProcessed %}<div class="small mt-1">Results committed before the failure were kept; reports for this session are partial.</div>{% endif %}
+  </div>
+{% endif %}
+
+{% if session.summary %}
+  <h2 class="h5">Summary</h2>
+  <div class="mb-2">{{ summary_cards(session.summary) }}</div>
+  {% if session.status in ('Completed', 'Failed') and not session.framesProcessed %}
+    <p class="small text-body-secondary">No frame set was processed, so no report was generated.</p>
+  {% endif %}
+{% endif %}
+
+<div class="row g-4 mt-1">
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-header"><i class="bi bi-info-circle me-1"></i>Session record</div>
+      <div class="card-body">
+        <dl class="row small mb-0">
+          {% if principal.is_admin %}<dt class="col-sm-5">Owner</dt><dd class="col-sm-7">{{ session.username }} ({{ session.userId }})</dd>{% endif %}
+          <dt class="col-sm-5">Started (UTC)</dt><dd class="col-sm-7 mono">{{ session.startTime|iso }}</dd>
+          <dt class="col-sm-5">Running since</dt><dd class="col-sm-7 mono">{{ session.runningSince|iso or '—' }}</dd>
+          <dt class="col-sm-5">Ended (UTC)</dt><dd class="col-sm-7 mono">{{ session.endTime|iso or '—' }}</dd>
+          <dt class="col-sm-5">Frames processed</dt><dd class="col-sm-7">{{ session.framesProcessed }}</dd>
+          <dt class="col-sm-5">Frame sets rejected</dt><dd class="col-sm-7">{{ session.framesRejected }}</dd>
+          <dt class="col-sm-5">Discarded at stop</dt><dd class="col-sm-7">{{ session.framesDiscarded or 0 }}</dd>
+          <dt class="col-sm-5">Source frames</dt><dd class="col-sm-7">{{ session.firstFrameIndex if session.firstFrameIndex is not none else '—' }} – {{ session.lastFrameIndex if session.lastFrameIndex is not none else '—' }}</dd>
+          <dt class="col-sm-5">Calibration</dt><dd class="col-sm-7">{{ session.calibrationId }}</dd>
+          <dt class="col-sm-5">Camera order</dt><dd class="col-sm-7">{{ session.cameraOrder|join(', ') }}</dd>
+          <dt class="col-sm-5">Checkpoint</dt><dd class="col-sm-7">{{ session.checkpoint.checkpointId }} · {{ session.checkpoint.modelName }} · {{ session.checkpoint.version }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-file-earmark-bar-graph me-1"></i>Reports</span>
+        {% if not report_problem %}
+        <form method="post" action="{{ url_for('reports.generate') }}">
+          {{ csrf() }}
+          <input type="hidden" name="sessionId" value="{{ session._id }}">
+          <input type="hidden" name="next" value="{{ request.path }}">
+          <button class="btn btn-sm btn-outline-primary" type="submit"><i class="bi bi-arrow-repeat me-1"></i>Generate report</button>
+        </form>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        {% if report_problem %}<p class="small text-body-secondary">{{ report_problem }}</p>{% endif %}
+        {% if reports %}
+        <div class="list-group list-group-flush">
+          {% for r in reports %}
+            <a href="{{ url_for('reports.detail', report_id=r._id) }}" class="list-group-item list-group-item-action px-0 d-flex justify-content-between align-items-center">
+              <span><strong>{{ r._id }}</strong> <span class="small text-body-secondary">{{ r.reportType|lower }} · {{ r.generatedAt|iso }}</span></span>
+              {{ badge(r.status) }}
+            </a>
+          {% endfor %}
+        </div>
+        {% elif not report_problem %}
+          <p class="small text-body-secondary mb-0">No report yet. Generate one with the button above.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if session.environment %}
+<div class="accordion mt-4" id="envAccordion">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#envBody">
+        <i class="bi bi-gear me-2"></i>Inference environment (reproducibility record)
+      </button>
+    </h2>
+    <div id="envBody" class="accordion-collapse collapse" data-bs-parent="#envAccordion">
+      <div class="accordion-body">
+        <dl class="row small mb-0">
+          {% for k, v in session.environment.items() %}<dt class="col-sm-4">{{ k }}</dt><dd class="col-sm-8 mono">{{ v }}</dd>{% endfor %}
+          <dt class="col-sm-4">checkpoint sha256</dt><dd class="col-sm-8 mono">{{ session.checkpoint.sha256 }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

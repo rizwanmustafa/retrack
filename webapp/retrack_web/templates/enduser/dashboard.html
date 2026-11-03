@@ -1,0 +1,105 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, runtime_badge, page_header, empty_state %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+{% call page_header('Dashboard', 'Welcome, ' ~ principal.name) %}
+  <a class="btn btn-sm btn-primary" href="{{ url_for('enduser.setup') }}"><i class="bi bi-play-circle me-1"></i>New session</a>
+{% endcall %}
+
+{% if active %}
+<div class="alert alert-primary d-flex align-items-center justify-content-between" role="alert">
+  <div><i class="bi bi-broadcast me-2"></i>Session <strong>{{ active._id }}</strong> is {{ badge(active.status) }}
+    ({{ active.inputMode }}).</div>
+  <a class="btn btn-sm btn-primary" href="{{ url_for('enduser.live', session_id=active._id) }}">Open live view</a>
+</div>
+{% endif %}
+
+<div class="row row-cols-1 row-cols-md-3 g-3 mb-4">
+  <div class="col">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="h6 text-body-secondary text-uppercase"><i class="bi bi-camera-video me-1"></i>Calibration</h2>
+        {% if calibration %}
+          <p class="mb-1"><strong>{{ calibration._id }}</strong> {{ badge('Valid') }}</p>
+          <p class="small text-body-secondary mb-0">{{ calibration.calibrationFile }} · uploaded {{ calibration.uploadedAt|iso }}</p>
+        {% else %}
+          <p class="mb-1">No valid calibration selected.</p>
+          <p class="small text-body-secondary mb-0">Start is unavailable until you select one.</p>
+        {% endif %}
+      </div>
+      <div class="card-footer bg-transparent"><a href="{{ url_for('enduser.setup') }}" class="small">Session setup</a></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="h6 text-body-secondary text-uppercase"><i class="bi bi-cpu me-1"></i>Model</h2>
+        {% if checkpoint %}
+          <p class="mb-1"><strong>{{ checkpoint.modelName or 'checkpoint' }}</strong> · {{ checkpoint._id }}</p>
+          <p class="small text-body-secondary mb-0">{{ checkpoint.version }}</p>
+        {% else %}
+          <p class="mb-1">No checkpoint is active.</p>
+          <p class="small text-body-secondary mb-0">An Admin must select a compatible checkpoint.</p>
+        {% endif %}
+        <p class="small mb-0 mt-2">Model instance:
+          {% if busy %}<span class="badge text-bg-warning">Busy</span>{% else %}<span class="badge text-bg-success">Available</span>{% endif %}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="h6 text-body-secondary text-uppercase"><i class="bi bi-pencil-square me-1"></i>Profile request</h2>
+        {% if latest_request %}
+          <p class="mb-1"><strong>{{ latest_request._id }}</strong> {{ badge(latest_request.status) }}</p>
+          <p class="small text-body-secondary mb-0">Submitted {{ latest_request.createdAt|iso }}</p>
+        {% else %}
+          <p class="mb-0 text-body-secondary">No profile-update requests.</p>
+        {% endif %}
+      </div>
+      <div class="card-footer bg-transparent"><a href="{{ url_for('enduser.profile_requests') }}" class="small">Profile requests</a></div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <h2 class="h5">Recent sessions</h2>
+    {% if sessions %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle">
+        <thead><tr><th>Session</th><th>Mode</th><th>Status</th><th>Started (UTC)</th><th class="text-end">Frames</th></tr></thead>
+        <tbody>
+        {% for s in sessions %}
+          <tr>
+            <td><a href="{{ url_for('enduser.session_detail', session_id=s._id) }}">{{ s._id }}</a></td>
+            <td>{{ badge(s.inputMode) }}</td>
+            <td>{{ badge(s.status) }}</td>
+            <td class="small mono">{{ s.startTime|iso }}</td>
+            <td class="text-end">{{ s.framesProcessed }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      {{ empty_state('collection-play', 'No sessions yet', 'Configure a session to start monitoring.') }}
+    {% endif %}
+  </div>
+  <div class="col-lg-5">
+    <h2 class="h5">Recent reports</h2>
+    {% if reports %}
+    <div class="list-group">
+      {% for r in reports %}
+        <a href="{{ url_for('reports.detail', report_id=r._id) }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+          <span><strong>{{ r._id }}</strong> <span class="small text-body-secondary">session {{ r.sessionId }}</span></span>
+          {{ badge(r.status) }}
+        </a>
+      {% endfor %}
+    </div>
+    {% else %}
+      {{ empty_state('file-earmark-bar-graph', 'No reports yet', 'Reports are generated when a session with processed frames is finalized.') }}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

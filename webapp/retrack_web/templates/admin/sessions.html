@@ -1,0 +1,30 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header, empty_state %}
+{% block title %}Sessions{% endblock %}
+{% block content %}
+{% call page_header('Sessions', 'Session records for report generation and diagnostics. Monitoring is operated by End Users.') %}{% endcall %}
+{% if sessions %}
+<div class="table-responsive">
+  <table class="table table-striped table-hover align-middle">
+    <thead><tr><th>Session</th><th>Owner</th><th>Mode</th><th>Status</th><th>Started (UTC)</th><th>Ended (UTC)</th>
+      <th class="text-end">Processed</th><th class="text-end">Rejected</th></tr></thead>
+    <tbody>
+    {% for s in sessions %}
+      <tr>
+        <td><a href="{{ url_for('admin.session_detail', session_id=s._id) }}">{{ s._id }}</a></td>
+        <td>{{ s.username }}</td>
+        <td>{{ badge(s.inputMode) }}</td>
+        <td>{{ badge(s.status) }}</td>
+        <td class="small mono">{{ s.startTime|iso }}</td>
+        <td class="small mono">{{ s.endTime|iso or '—' }}</td>
+        <td class="text-end">{{ s.framesProcessed }}</td>
+        <td class="text-end">{{ s.framesRejected }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  {{ empty_state('collection', 'No sessions yet', 'Sessions started by End Users appear here.') }}
+{% endif %}
+{% endblock %}

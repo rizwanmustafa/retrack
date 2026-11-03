@@ -1,0 +1,132 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, runtime_badge, page_header, csrf with context %}
+{% block title %}Live view {{ session._id }}{% endblock %}
+{% block content %}
+<div id="live" data-url="{{ url_for('api.live_result', session_id=session._id) }}"
+     data-detail-url="{{ url_for('enduser.session_detail', session_id=session._id) }}">
+
+{% call page_header('Live view · ' ~ session._id, session.inputMode ~ ' input · cameras ' ~ session.cameraOrder|join(', ')) %}
+  <form method="post" action="{{ url_for('enduser.stop_session', session_id=session._id) }}" id="stopForm"
+        {% if session.status not in ('Initializing', 'Running') or session.stopRequestedAt %}hidden{% endif %}>
+    {{ csrf() }}
+    <button type="submit" class="btn btn-danger" data-confirm="Stop accepting input and finalize session {{ session._id }}? A report is generated automatically when frame sets were processed."
+            data-confirm-title="Stop monitoring" data-confirm-class="btn-danger" data-confirm-label="Stop session">
+      <i class="bi bi-stop-fill me-1"></i>Stop
+    </button>
+  </form>
+{% endcall %}
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <span id="statusBadge">{{ badge(session.status) }}</span>
+  <span id="runtimeBadge">{{ runtime_badge(session.runtimeStatus) }}</span>
+  <span class="badge text-bg-light border"><i class="bi bi-hash"></i> frame <span id="frameIndex">—</span></span>
+  <span class="badge text-bg-light border"><i class="bi bi-clock"></i> source time <span id="frameTime" class="mono">—</span></span>
+  <span class="badge text-bg-light border"><i class="bi bi-cpu"></i> {{ session.checkpoint.modelName or 'model' }} · {{ session.checkpoint.checkpointId }}</span>
+</div>
+
+<div id="statusAlert" class="alert alert-secondary d-flex align-items-center" role="status">
+  <div class="spinner-border spinner-border-sm me-2" id="statusSpinner" aria-hidden="true"></div>
+  <span id="statusMessage">Loading session status…</span>
+</div>
+
+{% if ingest_token %}
+<div class="accordion mb-3" id="ingestInfo">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#ingestBody"
+              aria-expanded="false" aria-controls="ingestBody">
+        <i class="bi bi-plug me-2"></i>Camera rig connection (LIVE input)
+      </button>
+    </h2>
+    <div id="ingestBody" class="accordion-collapse collapse" data-bs-parent="#ingestInfo">
+      <div class="accordion-body small">
+        <p class="mb-2">The camera rig supplies frame sets by HTTP POST (multipart) to:</p>
+        <p><code>{{ url_for('api.ingest_frame_set', session_id=session._id, _external=True) }}</code></p>
+        <p class="mb-1">Header <code>Authorization: Bearer &lt;token&gt;</code>, fields <code>frameIndex</code>,
+          <code>sourceTime</code> (ISO 8601 with offset) and one 1920×1080 image per camera named
+          {% for cam in session.cameraOrder %}<code>{{ cam }}</code>{{ ', ' if not loop.last }}{% endfor %}, in that order.</p>
+        <label class="form-label mt-2 mb-1" for="ingestToken">Ingest token for this session</label>
+        <div class="input-group input-group-sm">
+          <input class="form-control mono" id="ingestToken" type="password" value="{{ ingest_token }}" readonly>
+          <button class="btn btn-outline-secondary" type="button" id="toggleToken"><i class="bi bi-eye"></i></button>
+        </div>
+        <div class="form-text">Keep the token private. It stops working when the session ends.</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div id="finalSummary" class="mb-4" hidden>
+  <div class="card border-success shadow-sm">
+    <div class="card-body">
+      <h2 class="h5 card-title"><i class="bi bi-flag me-1"></i>Session summary</h2>
+      <div class="row row-cols-2 row-cols-lg-4 g-3 mb-2" id="summaryValues"></div>
+      <p class="small text-body-secondary mb-2">uniqueTracks counts session-local track IDs, not guaranteed unique real people.</p>
+      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('enduser.session_detail', session_id=session._id) }}">Session details and reports</a>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-map me-1"></i>Bird's eye view</span>
+        <span class="small text-body-secondary">ground plane, {{ scene.TRANSLATION_UNIT }} · trajectories of observed tracks</span>
+      </div>
+      <div class="card-body">
+        <canvas id="bev-canvas" width="1080" height="390" aria-label="Bird's eye view of ground positions"></canvas>
+      </div>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-camera-video me-1"></i>Camera views</span>
+        <span class="small text-body-secondary" id="cameraNote">Track IDs are drawn at each track's projected ground position.</span>
+      </div>
+      <div class="card-body">
+        <div class="row row-cols-1 row-cols-md-2 row-cols-xxl-3 g-2" id="cameraGrid">
+          {% for cam in session.cameraOrder %}
+          <div class="col">
+            <div class="camera-tile" data-camera="{{ cam }}">
+              <span class="badge text-bg-dark camera-label">{{ cam }}</span>
+              <div class="camera-empty">No image yet</div>
+              <img alt="{{ cam }} view" hidden>
+              <canvas width="480" height="270"></canvas>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header"><i class="bi bi-activity me-1"></i>Current frame</div>
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex justify-content-between"><span>Occupancy</span><strong id="occupancy">—</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span>Frames processed</span><strong id="framesProcessed">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span>Frame sets rejected</span><strong id="framesRejected">0</strong></li>
+      </ul>
+    </div>
+    <div class="card shadow-sm mb-4">
+      <div class="card-header"><i class="bi bi-people me-1"></i>Observed tracks</div>
+      <div class="table-responsive" style="max-height: 420px">
+        <table class="table table-sm table-hover mb-0">
+          <thead class="sticky-top"><tr><th>Track</th><th class="text-end">x (cm)</th><th class="text-end">y (cm)</th><th class="text-end">Conf.</th></tr></thead>
+          <tbody id="trackRows"><tr><td colspan="4" class="text-body-secondary small">No processed frame set yet.</td></tr></tbody>
+        </table>
+      </div>
+      <div class="card-footer small text-body-secondary">Track IDs are unique within this session only and do not identify people.</div>
+    </div>
+    <div class="card shadow-sm" id="faultCard" hidden>
+      <div class="card-header text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>Last input fault</div>
+      <div class="card-body small" id="faultText"></div>
+    </div>
+  </div>
+</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/live.js') }}"></script>
+{% endblock %}

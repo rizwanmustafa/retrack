@@ -1,0 +1,46 @@
+{% extends 'layouts/app.html' %}
+{% from '_macros.html' import badge, page_header %}
+{% block title %}Record {{ record._id }}{% endblock %}
+{% block content %}
+{% call page_header('Record ' ~ record._id, record.activityType) %}
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.audit_log') }}"><i class="bi bi-arrow-left me-1"></i>Audit log</a>
+{% endcall %}
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card shadow-sm {% if record.errorFlag %}border-danger{% endif %}">
+      <div class="card-header d-flex justify-content-between">{{ record.activityType }} {{ badge(record.outcome) }}</div>
+      <div class="card-body">
+        <dl class="row small mb-0">
+          <dt class="col-sm-4">Time (UTC)</dt><dd class="col-sm-8 mono">{{ record.timestamp|iso }}</dd>
+          <dt class="col-sm-4">Actor</dt><dd class="col-sm-8">{{ record.performedBy.username }} ({{ record.performedBy.type }}{% if record.performedBy.id != 'SYSTEM' %}, {{ record.performedBy.id }}{% endif %})</dd>
+          <dt class="col-sm-4">Resource</dt><dd class="col-sm-8">{{ record.resource.type }} {{ record.resource.id or '—' }}</dd>
+          <dt class="col-sm-4">Error</dt><dd class="col-sm-8">{{ 'yes' if record.errorFlag else 'no' }}</dd>
+          {% for k, v in record.details.items() %}
+            <dt class="col-sm-4">{{ k }}</dt>
+            <dd class="col-sm-8">{% if v is mapping or (v is iterable and v is not string) %}<pre class="mb-0 small">{{ v|tojson(indent=1) }}</pre>{% else %}{{ v }}{% endif %}</dd>
+          {% endfor %}
+        </dl>
+      </div>
+    </div>
+  </div>
+  {% if session %}
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header">Session {{ session._id }} {{ badge(session.status) }}</div>
+      <div class="card-body small">
+        {% if session.failure %}
+          <div class="alert alert-danger py-2"><strong>{{ session.failure.stage|capitalize }} failure:</strong> {{ session.failure.message }}
+            {% if session.failure.frameIndex is defined %}<div>Frame {{ session.failure.frameIndex }}</div>{% endif %}
+            <div class="mono">{{ session.failure.at }}</div></div>
+        {% endif %}
+        {% if session.lastInputFault %}
+          <p class="mb-1"><strong>Last input fault:</strong> {{ session.lastInputFault.kind }} — {{ session.lastInputFault.reason }}</p>
+        {% endif %}
+        <p class="mb-1">Owner {{ session.username }} · {{ session.inputMode }} · processed {{ session.framesProcessed }}, rejected {{ session.framesRejected }}</p>
+        <a href="{{ url_for('admin.session_detail', session_id=session._id) }}">Session details</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
