@@ -180,9 +180,18 @@ many cameras, which hurts when fewer cameras remain. Options to reduce it: weake
 probability), or pairing the noise model with detection of dropped/frozen cameras (Approach 2) so that the
 remaining cameras are not misread.
 
-Caveat: one seed. The robustness gains (+8 to +28 MODA) are far beyond noise; the +1.1 clean gain and the
-missing-camera cost (−3.4 at k = 3) are not yet. A confirmation run with two more seeds of `concat` and
-`concat_calib` is next ([`CONFIRMATION_RUN.md`](CONFIRMATION_RUN.md)).
+**Confirmed over three seeds** ([`CONFIRMATION_RUN.md`](CONFIRMATION_RUN.md)): clean MODA 91.0 ± 0.4 → 92.0 ± 0.1;
+roll/pitch σ = 0.5° ΔMODA −13.4 → −2.1; all cameras 0.75° 72.4 → 82.4; all cameras 1° 44.4 → 68.6. The
+missing-camera cost is confirmed as well (3 cameras removed: 83.0 → 79.8), and halves with each model's own tuned
+threshold (→ 81.4).
+
+**Noise strength:** σ = 0.25°, 0.5° and 1° were compared. Robustness to calibration error grows up to σ ≈ 0.5° and then
+levels off, the missing-camera cost keeps growing, and clean accuracy peaks at 0.5°, so σ = 0.5° is the chosen
+setting. No noise strength removes the trade-off.
+
+**Possible mitigation, untested:** a deployed system knows which camera streams are down. Since a model-specific
+threshold halves the 3-camera cost, lowering the detection threshold according to the number of working cameras
+might recover part of it without retraining. This needs a threshold sweep per number of removed cameras.
 
 ## Approach 2: Detect and drop the faulty camera
 

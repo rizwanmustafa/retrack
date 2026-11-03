@@ -120,5 +120,38 @@ errors, less robust to missing or frozen cameras.
   removed (`concat_calib` 79.5, `concat` 82.9), it is the better trade-off and should be the recommended setting.
 - If σ = 1° costs clean accuracy or missing-camera robustness further, report that stronger noise over-regularises.
 
+## Result (run completed 3 Nov 2026)
+
+**Confirmed.** Over three seeds `concat_calib` clears every criterion:
+
+| Condition (MODA, mean ± std over 3 seeds) | `concat` (TrackTacular) | `concat_calib` | |
+|---|---|---|---|
+| Clean calibration | 91.0 ± 0.4 | **92.0 ± 0.1** | ✅ +1.0 |
+| Roll/pitch σ = 0.5° (ΔMODA) | −13.4 | **−2.1** | ✅ |
+| All cameras 0.75° | 72.4 ± 1.7 | **82.4 ± 1.1** | ✅ +10.0 |
+| All cameras 1° | 44.4 ± 1.8 | **68.6 ± 2.1** | +24.2 |
+| Roll/pitch σ = 1° | 64.0 ± 1.8 | **85.9 ± 0.6** | +21.9 |
+| All 7 cameras at 1° | 46.1 ± 3.7 | **75.0 ± 1.4** | +28.9 |
+
+Clean tracking also improves: MOTA 89.6 ± 1.4 → 91.0 ± 0.4, IDF1 93.4 → 94.3. The +1.0 clean MODA gain is about
+twice the baseline's seed spread.
+
+**The trade-off is confirmed too** (MODA with cameras removed, 3 seeds): 1 removed 89.6 → 89.4, 2 removed 87.1 → 85.8,
+3 removed 83.0 ± 0.7 → 79.8 ± 0.6; a frozen camera costs −9.3 instead of −7.0. With each model's own tuned
+threshold the 3-camera cost halves (83.0 → 81.4), so part of it is under-confidence rather than missed people.
+
+**Noise-strength sensitivity** (seed 80085 for all four rows):
+
+| Training noise | Clean MODA | Test roll/pitch σ = 1° | All cameras 1° | 3 cameras removed | Frozen (ΔMODA) |
+|---|---|---|---|---|---|
+| none (`concat`) | 90.9 | 65.4 | 43.5 | 82.9 | −6.3 |
+| σ = 0.25° (`concat_calib_weak`) | 90.9 | 78.0 | 61.1 | 81.0 | −7.9 |
+| σ = 0.5° (`concat_calib`) | **92.0** | 85.9 | 67.0 | 79.5 | −10.1 |
+| σ = 1° (`concat_calib_strong`) | 90.5 | 86.0 | 68.8 | 76.8 | −9.9 |
+
+Calibration robustness grows with the noise strength up to σ ≈ 0.5° and then levels off; the missing-camera cost keeps
+growing; clean accuracy peaks at 0.5°. **σ = 0.5° is the best balance**, which answers "why 0.5°?". No setting removes
+the trade-off. Caveat: the three noise strengths are compared with one seed each.
+
 After the run, paste `CALIB_SWEEP.md` (and the `concat` / `concat_calib` rows of `REPORT.md`'s Stage 4 table, which
 show the effect on missing cameras) for analysis.

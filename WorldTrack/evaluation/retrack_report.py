@@ -30,7 +30,7 @@ VARIANT_NAMES = {
     'concat_calib_strong': 'Concat + calibration noise (σ = 1°)',
     'masked_calib': 'Masked + cam-dropout + calibration noise',
     'baseline': 'TrackTacular baseline',
-    'retrack': 'Retrack (full)',
+    'retrack': 'Retrack (calibration-noise training)',
 }
 METHOD_NAMES = {
     'S0_baseline': 'S0 baseline (thr 0.5, TrackTacular tracker)',
@@ -134,6 +134,49 @@ def plot_sweep(sweep, path):
     plt.close(fig)
 
 
+RETRACK_VARIANT = 'concat_calib'
+CALIB_ROWS = [('clean', 0.0, 'clean calibration'), ('roll_pitch_gauss', 0.5, 'roll/pitch Gaussian σ = 0.5°'),
+              ('roll_pitch_gauss', 1.0, 'roll/pitch Gaussian σ = 1°'), ('fixed_angle', 0.5, 'all cameras 0.5°'),
+              ('fixed_angle', 0.75, 'all cameras 0.75°'), ('fixed_angle', 1.0, 'all cameras 1°'),
+              ('k_cameras', 3, '3 cameras at 1°'), ('k_cameras', 7, 'all 7 cameras at 1°')]
+
+
+def calibration_section(results, out):
+    """Section 7: TrackTacular vs Retrack under calibration errors, from perturb/calib_sweep/*.csv if present."""
+    files = glob.glob(osp.join(results, 'perturb', 'calib_sweep', '*.csv'))
+    if not files:
+        return []
+    df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    df = df[df.variant.isin(['concat', RETRACK_VARIANT])]
+    if df.variant.nunique() < 2:
+        return []
+    # mean over random draws per seed, then mean +- std over seeds
+    per_seed = df.groupby(['variant', 'tag', 'protocol', 'magnitude'])[['moda', 'S0_mota', 'S0_idf1']].mean()
+    stats = per_seed.groupby(['variant', 'protocol', 'magnitude']).agg(['mean', 'std']).fillna(0)
+    seeds = df.groupby('variant').tag.nunique()
+    rows = []
+    for protocol, mag, label in CALIB_ROWS:
+        try:
+            b = stats.loc[('concat', protocol, mag)]
+            o = stats.loc[(RETRACK_VARIANT, protocol, mag)]
+        except KeyError:
+            continue
+        cell = lambda r, m: f"{r[(m, 'mean')]:.1f} ± {r[(m, 'std')]:.1f}"
+        rows.append({'condition': label, 'TrackTacular MODA': cell(b, 'moda'), 'Retrack MODA': cell(o, 'moda'),
+                     'Δ MODA': f"{o[('moda', 'mean')] - b[('moda', 'mean')]:+.1f}",
+                     'TrackTacular MOTA': cell(b, 'S0_mota'), 'Retrack MOTA': cell(o, 'S0_mota'),
+                     'TrackTacular IDF1': cell(b, 'S0_idf1'), 'Retrack IDF1': cell(o, 'S0_idf1')})
+    if not rows:
+        return []
+    pd.DataFrame(rows).to_csv(osp.join(out, 'calibration_comparison.csv'), index=False)
+    return ['\n## 7. TrackTacular vs Retrack under calibration errors\n',
+            f"From the calibration sweep (`evaluation/perturb_eval.py --mode calib_sweep`): the model keeps the "
+            f"original calibration while the cameras are rotated; every model sees the same perturbations. Seeds: "
+            f"TrackTacular {seeds.get('concat', 0)}, Retrack {seeds.get(RETRACK_VARIANT, 0)}; ± is the std over "
+            f"seeds. Threshold 0.5, TrackTacular tracker.\n\n",
+            md_table(rows, list(rows[0].keys()))]
+
+
 def build_report(results):
     df = load(results)
     out = osp.join(results, 'report')
@@ -171,6 +214,7 @@ def build_report(results):
             if osp.exists(info):
                 tuned[tag] = json.load(open(info))['tuned_thr']
         sweep = base[(base.method == 'sweep') & (base.k == 0)]
+    if not base.empty and not sweep.empty:
         sweep = aggregate(sweep, ['thr'], ALL).sort_values('thr')
         sweep.to_csv(osp.join(out, 'stage1_threshold_sweep.csv'), index=False)
         plot_sweep(sweep, osp.join(out, 'stage1_threshold_sweep.png'))
@@ -185,6 +229,7 @@ def build_report(results):
                'upper bound; the full curve is shown.\n\n',
                md_table(rows, list(rows[0].keys())), '\n![sweep](stage1_threshold_sweep.png)\n']
 
+    if not base.empty:
         agg = aggregate(base[base.method.isin(METHOD_NAMES)], ['method', 'k'], ALL)
         agg.to_csv(osp.join(out, 'stages1-3_baseline_by_k.csv'), index=False)
         rows = []
@@ -264,10 +309,9 @@ def build_report(results):
         full = aggregate(tr[tr.method.isin(METHOD_NAMES)], ['variant', 'method', 'k'], ALL)
         full.to_csv(osp.join(out, 'all_variants_all_methods.csv'), index=False)
 
-        # ---------------- final comparison
+        # ---------------- final comparison: TrackTacular vs the Retrack model, same tracker and threshold
         base = full[(full.variant == 'concat') & (full.method == 'S0_baseline')].assign(name='baseline')
-        best_method = 'S3_byte_reid' if (full.method == 'S3_byte_reid').any() else 'S2_byte'
-        ours = full[(full.variant == 'weighted_cov_drop') & (full.method == best_method)].assign(name='retrack')
+        ours = full[(full.variant == RETRACK_VARIANT) & (full.method == 'S0_baseline')].assign(name='retrack')
         if not base.empty and not ours.empty:
             rows = []
             for k in sorted(set(base.k) & set(ours.k)):
@@ -278,11 +322,12 @@ def build_report(results):
                                     ('id_switches', 'ID switches', 1), ('fragmentations', 'Fragmentations', 1),
                                     ('trk_misses', 'Misses', 0), ('trk_fp', 'False positives', 0)]:
                     rows.append({'k': k, 'metric': label, 'TrackTacular baseline': fmt(b, m, d),
-                                 'Retrack (full)': fmt(o, m, d), 'Δ': f'{o[m] - b[m]:+.{max(d, 1)}f}'})
-            md += ['\n## 6. Final comparison — TrackTacular baseline vs full Retrack\n',
-                   'Baseline = retrained concatenation model, threshold 0.5, TrackTacular tracker. '
-                   'Retrack = weighted fusion + coverage map + camera-dropout training, tuned threshold, '
-                   'ByteTrack-style association and camera-dropout-aware re-ID. Same training schedule and seeds.\n\n',
+                                 'Retrack': fmt(o, m, d), 'Δ': f'{o[m] - b[m]:+.{max(d, 1)}f}'})
+            md += ['\n## 6. Final comparison — TrackTacular vs Retrack, cameras removed\n',
+                   'TrackTacular = retrained concatenation model. Retrack = the same model trained with calibration '
+                   'noise (Gaussian roll/pitch, σ = 0.5°, `concat_calib`). Both use threshold 0.5 and the TrackTacular '
+                   'tracker, same training schedule and seeds, so only the training differs. Calibration robustness '
+                   'is in section 7.\n\n',
                    md_table(rows, list(rows[0].keys()))]
             both = pd.concat([base, ours])
             for m in ['moda', 'mota', 'idf1']:
@@ -290,6 +335,8 @@ def build_report(results):
                             osp.join(out, f'final_{m}.png'), 'name', ['baseline', 'retrack'])
             md += ['\n![moda](final_moda.png) ![mota](final_mota.png) ![idf1](final_idf1.png)\n']
             pd.concat([base, ours]).to_csv(osp.join(out, 'final_comparison.csv'), index=False)
+
+    md += calibration_section(results, out)
 
     off = df[df.variant == 'official']
     if not off.empty:
