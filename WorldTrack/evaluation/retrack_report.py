@@ -15,7 +15,9 @@ import numpy as np
 import pandas as pd
 
 VARIANTS = ['concat', 'concat_drop', 'masked_drop', 'masked_cov_drop', 'weighted_cov_drop', 'concat_calib',
-            'masked_calib']
+            'masked_calib', 'concat_calib_weak', 'concat_calib_strong']
+# the noise-strength variants appear in the tables only; at most 7 series per plot keeps the colours distinct
+PLOT_VARIANTS = VARIANTS[:7]
 VARIANT_NAMES = {
     'official': 'Official TrackTacular checkpoint',
     'concat': 'Concat (baseline)',
@@ -23,7 +25,9 @@ VARIANT_NAMES = {
     'masked_drop': 'Masked + cam-dropout',
     'masked_cov_drop': 'Masked + coverage + cam-dropout',
     'weighted_cov_drop': 'Weighted + coverage + cam-dropout (Retrack)',
-    'concat_calib': 'Concat + calibration noise',
+    'concat_calib': 'Concat + calibration noise (σ = 0.5°)',
+    'concat_calib_weak': 'Concat + calibration noise (σ = 0.25°)',
+    'concat_calib_strong': 'Concat + calibration noise (σ = 1°)',
     'masked_calib': 'Masked + cam-dropout + calibration noise',
     'baseline': 'TrackTacular baseline',
     'retrack': 'Retrack (full)',
@@ -246,7 +250,7 @@ def build_report(results):
                'fusion is isolated. Slope = metric points lost per removed camera (linear fit).\n\n', table]
         for m in ['moda', 'mota', 'idf1']:
             plot_curves(agg, m, f'Stage 4 fusion ablation: {m.upper()} vs removed cameras',
-                        osp.join(out, f'stage4_{m}.png'), 'variant', VARIANTS)
+                        osp.join(out, f'stage4_{m}.png'), 'variant', PLOT_VARIANTS)
         md += ['\n![moda](stage4_moda.png) ![mota](stage4_mota.png) ![idf1](stage4_idf1.png)\n']
 
         agg_t, table = ablation_table('S1_threshold')

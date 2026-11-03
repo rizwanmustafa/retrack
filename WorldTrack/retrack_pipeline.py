@@ -33,8 +33,9 @@ import zipfile
 
 HERE = osp.dirname(osp.abspath(__file__))
 VARIANTS = ['concat', 'concat_drop', 'masked_drop', 'masked_cov_drop', 'weighted_cov_drop']
-# Approach 1 (calibration-noise training), run on request: --variants concat_calib masked_calib
-EXTRA_VARIANTS = ['concat_calib', 'masked_calib']
+# Approach 1 (calibration-noise training), run on request: --variants concat_calib masked_calib; the weak/strong
+# variants change only the noise strength (sigma 0.25 / 1 degree instead of 0.5) for a sensitivity analysis
+EXTRA_VARIANTS = ['concat_calib', 'masked_calib', 'concat_calib_weak', 'concat_calib_strong']
 SEEDS = [80085, 1, 2, 3, 4]  # 80085 is the repo's / official checkpoint's seed
 ZOO_URL = 'https://github.com/tteepe/TrackTacular/releases/download/v1/wild_{model}.zip'
 KAGGLE_WILDTRACK = 'aryashah2k/large-scale-multicamera-detection-dataset'

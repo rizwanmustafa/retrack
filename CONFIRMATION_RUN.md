@@ -1,9 +1,14 @@
-# Confirmation run: calibration-noise training over three seeds
+# Confirmation run: calibration-noise training over three seeds, plus noise-strength sensitivity
 
 Purpose: confirm that calibration-noise training (Approach 1 in [`POTENTIAL_APPROACHES.md`](POTENTIAL_APPROACHES.md))
 helps reliably, not just for one training seed. With seed 1, `concat_calib` (TrackTacular trained with calibration
 noise) beat `concat` (TrackTacular) by 8–28 MODA under calibration errors and by 1.1 MODA with clean calibration.
 The robustness gains are far beyond noise; the clean gain is not yet.
+
+It also runs a **sensitivity analysis** of the noise strength. σ = 0.5° was chosen after looking at the calibration
+sweep on the test frames, so on its own it could be challenged as a tuned number. Training the same model with
+σ = 0.25° (`concat_calib_weak`) and σ = 1° (`concat_calib_strong`) shows how the result depends on that choice,
+and whether weaker noise keeps the calibration robustness while reducing the cost with missing cameras.
 
 ## What the run does
 
@@ -12,10 +17,12 @@ The robustness gains are far beyond noise; the clean gain is not yet.
    from its last saved epoch.
 2. Runs the calibration sweep for the new models. The summary covers all three seeds.
 3. Runs the other camera faults (lag, frozen camera, single-camera drift) for the new models.
-4. Disconnects the runtime so it stops using compute units.
+4. Trains and evaluates the two noise-strength variants (one seed each, 80085, the same seed as the existing
+   `concat_calib`), runs the calibration sweep and camera faults for them too, and disconnects the runtime.
 
-Time: about 2 h 45 min on an A100 (about 35 min per training run plus evaluation, 4 runs, then about 25 min of
-sweeps). Turn on background execution (Runtime → Change runtime type) and close the tab if you like.
+Time: about 4 h 15 min on an A100 (about 35 min per training run plus evaluation, 6 runs, then about 35 min of
+sweeps). The three-seed confirmation runs first, so its results are on Drive after about 2 h 45 min even if the
+session stops later. Turn on background execution (Runtime → Change runtime type) and close the tab if you like.
 
 ## Colab cell
 
@@ -46,7 +53,17 @@ DATA = '/content/data/Wildtrack'
 !cd /content/retrack/WorldTrack && python -m evaluation.perturb_eval \
     --results {RESULTS}/full --data_dir {DATA} --seed 80085 1 2
 
-# 4. Disconnect when done (flush first so every file reaches Drive)
+# 4. Noise-strength sensitivity: sigma 0.25 and 1 degree, one seed each (~80 min training + evaluation)
+!cd /content/retrack/WorldTrack && python retrack_pipeline.py --mode full --results {RESULTS} \
+    --variants concat_calib_weak concat_calib_strong --seeds 1
+
+# 5. Calibration sweep and camera faults for them; summaries are rewritten to include every model (~12 min)
+!cd /content/retrack/WorldTrack && python -m evaluation.perturb_eval --mode calib_sweep \
+    --results {RESULTS}/full --data_dir {DATA} --seed 80085 1 2
+!cd /content/retrack/WorldTrack && python -m evaluation.perturb_eval \
+    --results {RESULTS}/full --data_dir {DATA} --seed 80085 1 2
+
+# 6. Disconnect when done (flush first so every file reaches Drive)
 from google.colab import drive, runtime
 drive.flush_and_unmount()
 runtime.unassign()
@@ -94,6 +111,14 @@ Also check the **trade-off** seen with seed 1: `concat_calib` was worse with cam
 removed 79.5 vs 82.9; Stage 4 table in `REPORT.md`) and with a frozen camera (−10.1 vs −6.3 in `SUMMARY.md`). If
 this repeats over three seeds, report calibration-noise training as a trade-off: much more robust to calibration
 errors, less robust to missing or frozen cameras.
+
+**Noise-strength sensitivity** (compare `concat_calib_weak`, `concat_calib` and `concat_calib_strong`, seed 80085):
+
+- If the robustness gain holds across σ = 0.25°–1° (smaller at 0.25°, similar or larger at 1°), the method does not
+  depend on one tuned value, which is the answer to "why 0.5°?".
+- If σ = 0.25° keeps most of the gain under roll/pitch σ = 0.5° and 1° errors **and** loses less with 3 cameras
+  removed (`concat_calib` 79.5, `concat` 82.9), it is the better trade-off and should be the recommended setting.
+- If σ = 1° costs clean accuracy or missing-camera robustness further, report that stronger noise over-regularises.
 
 After the run, paste `CALIB_SWEEP.md` (and the `concat` / `concat_calib` rows of `REPORT.md`'s Stage 4 table, which
 show the effect on missing cameras) for analysis.
