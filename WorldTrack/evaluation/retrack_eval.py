@@ -61,8 +61,9 @@ def load_model(ckpt_path, device):
     return model.to(device).eval(), hparams
 
 
-def load_test_items(data_dir, model, num_workers=4):
-    """Loads the whole test split once (images kept as uint8, which is lossless for 8-bit images)."""
+def load_test_items(data_dir, model, num_workers=4, frame_range=None):
+    """Loads the whole test split once (images kept as uint8, which is lossless for 8-bit images).
+    frame_range: (start, end) fractions of the sequence, default the test split (0.9, 1)."""
     from torch.utils.data import DataLoader
     from datasets.pedestrian_dataset import PedestrianDataset
     from datasets.wildtrack_dataset import Wildtrack
@@ -70,7 +71,8 @@ def load_test_items(data_dir, model, num_workers=4):
 
     name = osp.basename(osp.normpath(data_dir)).lower()
     base = Wildtrack(data_dir) if 'wildtrack' in name else MultiviewX(data_dir)
-    dataset = PedestrianDataset(base, is_train=False, resolution=model.resolution, bounds=model.bounds)
+    dataset = PedestrianDataset(base, is_train=False, resolution=model.resolution, bounds=model.bounds,
+                                frame_range=frame_range)
     items = []
     for item, _ in DataLoader(dataset, batch_size=1, num_workers=num_workers):
         item['img'] = (item['img'] * 255).round().to(torch.uint8)
@@ -81,6 +83,8 @@ def load_test_items(data_dir, model, num_workers=4):
 def reset_temporal_cache(model):
     model.temporal_cache = None
     model.temporal_cache_frames = -2 * torch.ones(model.max_cache, dtype=torch.long)
+    if hasattr(model, 'temporal_cache_T'):
+        model.temporal_cache_T = torch.eye(3).repeat(model.max_cache, 1, 1)
 
 
 @torch.no_grad()
@@ -183,7 +187,22 @@ def tracking_metrics(frames, thr, tracker_kwargs, scale=MOT_SCALE):
         gt = f['gt']
         C = np.sqrt(mm.distances.norm2squared_matrix(gt[:, :2] * scale, hyp_xy * scale, max_d2=1))
         acc.update(gt[:, 2].astype(int).tolist(), hyp_ids, C, frameid=f['frame'])
+    return mot_summary(acc)
 
+
+def hyps_metrics(frames, hyps, scale=MOT_SCALE):
+    """CLEAR MOT / ID metrics of given per-frame hypotheses hyps[t] = [(track_id, xy), ...] (offline trackers)."""
+    acc = mm.MOTAccumulator()
+    for f, hyp in zip(frames, hyps):
+        hyp_ids = [h[0] for h in hyp]
+        hyp_xy = np.array([np.asarray(h[1], dtype=np.float64) for h in hyp]).reshape(-1, 2)
+        gt = f['gt']
+        C = np.sqrt(mm.distances.norm2squared_matrix(gt[:, :2] * scale, hyp_xy * scale, max_d2=1))
+        acc.update(gt[:, 2].astype(int).tolist(), hyp_ids, C, frameid=f['frame'])
+    return mot_summary(acc)
+
+
+def mot_summary(acc):
     mh = mm.metrics.create()
     s = mh.compute(acc, metrics=TRACK_KEYS, name='all').iloc[0].to_dict()
     n = max(s['num_unique_objects'], 1)

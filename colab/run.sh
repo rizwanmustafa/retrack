@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Installs the dependencies and runs the whole Retrack pipeline.
-#   bash colab/run.sh <quick|full> <results_dir> [extra retrack_pipeline.py args]
+# Installs the dependencies and runs the whole Retrack pipeline (default) or the ARL study (PIPELINE=arl).
+#   bash colab/run.sh <quick|full> <results_dir> [extra retrack_pipeline.py / arl_pipeline.py args]
+#   PIPELINE=arl bash colab/run.sh <quick|full> <results_dir>   -> everything under <results_dir>/arl_<mode>/
 set -euo pipefail
 MODE=${1:-full}
 RESULTS=${2:-/content/drive/MyDrive/retrack_results}
@@ -15,4 +16,9 @@ python -c "import torch, numpy, lightning, kornia; print('torch', torch.__versio
 cd "$REPO/WorldTrack"
 export PYTHONUNBUFFERED=1
 mkdir -p "$RESULTS"
-python retrack_pipeline.py --mode "$MODE" --results "$RESULTS" "$@" 2>&1 | tee -a "$RESULTS/pipeline_$MODE.log"
+if [ "${PIPELINE:-retrack}" = "arl" ]; then
+  mkdir -p "$RESULTS/arl_$MODE"
+  python arl_pipeline.py --mode "$MODE" --results "$RESULTS" "$@" 2>&1 | tee -a "$RESULTS/arl_$MODE/pipeline.log"
+else
+  python retrack_pipeline.py --mode "$MODE" --results "$RESULTS" "$@" 2>&1 | tee -a "$RESULTS/pipeline_$MODE.log"
+fi

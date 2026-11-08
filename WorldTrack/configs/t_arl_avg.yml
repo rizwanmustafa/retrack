@@ -1,0 +1,21 @@
+# ARL A5: same schedule as t_retrack.yml + average of the weights of the last 5 epochs (saved as averaged.ckpt)
+seed_everything: 80085
+trainer:
+  accelerator: gpu
+  devices: 1
+  max_epochs: 30
+  accumulate_grad_batches: 8
+  gradient_clip_val: 0.5
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 5
+  callbacks:
+    - class_path: LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: ModelCheckpoint
+      init_args:
+        save_last: true
+        save_top_k: 0
+    - class_path: utils.weight_averaging.EpochWeightAveraging
+      init_args:
+        last_k: 5

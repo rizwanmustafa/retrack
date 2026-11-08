@@ -215,3 +215,5 @@ WorldTrack/.ipynb_checkpoints/
 # IDEs
 .idea
 .vscode
+# downloaded research papers (~300 MB, kept locally, not in git)
+research_methodology_attempt_1/papers/

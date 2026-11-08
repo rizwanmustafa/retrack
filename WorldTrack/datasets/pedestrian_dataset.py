@@ -6,9 +6,15 @@ import torch
 import numpy as np
 from torchvision.datasets import VisionDataset
 import torchvision.transforms.functional as F
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from utils import geom, basic, vox
+
+# Both WILDTRACK and MultiviewX annotate on a 2.5 cm ground grid (reference coordinates are grid cells).
+GRID_CELL_M = 0.025
+# ARL A1: occluders are painted with the ImageNet mean colour (3DROM's constant value Omega is not given numerically)
+OCCLUDER_RGB = (124, 116, 104)
+SCENE_AUG_MODES = ('flip', 'flip_affine')
 
 
 class PedestrianDataset(VisionDataset):
@@ -20,8 +26,28 @@ class PedestrianDataset(VisionDataset):
             bounds=(-500, 500, -320, 320, 0, 2),
             final_dim: tuple = (720, 1280),
             resize_lim: list = (0.8, 1.2),
+            frame_range=None,
+            occlusion_prob: float = 0.0,
+            occlusion_num: int = 25,
+            occlusion_width_ratio: float = 0.4,
+            occlusion_min_dist: float = 1.0,
+            scene_aug_prob: float = 0.0,
+            scene_aug_mode: str = 'flip',
+            scene_aug_shift: float = 0.5,
+            scene_aug_rot: float = 5.0,
     ):
+        """
+        frame_range: (start, end) fractions of the sequence; default (0, 0.9) for training, (0.9, 1) otherwise.
+                     ARL's clean protocol trains on (0, 0.81) and tunes on (0.81, 0.9) (frames 0-323 / 324-359).
+        ARL A1, 3D random occlusion (3DROM, Alg. 1), training only:
+            occlusion_prob: probability that a sample gets occluders; occlusion_num: occluders per sample;
+            occlusion_width_ratio: occluder width / height in the image; occlusion_min_dist: metres between them.
+        ARL A2, scene-level BEV augmentation (MVAug scene augmentation), training only:
+            scene_aug_prob: probability per sample; scene_aug_mode: 'flip' (one of the three BEV mirror flips)
+            or 'flip_affine' (flip + rotation of up to scene_aug_rot degrees + shift of up to scene_aug_shift m).
+        """
         super().__init__(base.root)
+        assert scene_aug_mode in SCENE_AUG_MODES, scene_aug_mode
         self.base = base
         self.root, self.num_cam, self.num_frame = base.root, base.num_cam, base.num_frame
         # img_shape and worldgrid_shape is the original shape matching the annotations in dataset
@@ -45,10 +71,21 @@ class PedestrianDataset(VisionDataset):
             bounds=self.bounds,
             assert_cube=False)
 
-        if self.is_train:
-            frame_range = range(0, int(self.num_frame * 0.9))
-        else:
-            frame_range = range(int(self.num_frame * 0.9), self.num_frame)
+        self.occlusion_prob = occlusion_prob
+        self.occlusion_num = occlusion_num
+        self.occlusion_width_ratio = occlusion_width_ratio
+        self.occlusion_min_dist = occlusion_min_dist
+        # same person-height convention as tracking/reid.py (180 cm on WILDTRACK)
+        self.occluder_height = 0.9 * (self.bounds[5] - self.bounds[4])
+        self.scene_aug_prob = scene_aug_prob
+        self.scene_aug_mode = scene_aug_mode
+        self.scene_aug_shift = scene_aug_shift
+        self.scene_aug_rot = scene_aug_rot
+
+        if frame_range is None:
+            frame_range = (0.0, 0.9) if self.is_train else (0.9, 1.0)
+        self.frame_range_frac = tuple(frame_range)
+        frame_range = range(int(self.num_frame * frame_range[0]), int(self.num_frame * frame_range[1]))
 
         self.img_fpaths = self.base.get_image_fpaths(frame_range)
         self.world_gt = {}
@@ -215,11 +252,60 @@ class PedestrianDataset(VisionDataset):
             crop = (crop_w, crop_h, crop_w + fW, crop_h + fH)
         return resize_dims, crop
 
+    # ------------------------------------------------------------ ARL A1: 3D random occlusion (3DROM Alg. 1)
+    def sample_occluders(self):
+        """Ground positions (reference / world-grid coordinates) of the occluders of one frame, or None."""
+        if not self.is_train or self.occlusion_prob <= 0 or np.random.rand() >= self.occlusion_prob:
+            return None
+        xmin, xmax, ymin, ymax = self.bounds[:4]
+        min_d = self.occlusion_min_dist / GRID_CELL_M
+        pts = []
+        for _ in range(self.occlusion_num * 50):
+            if len(pts) == self.occlusion_num:
+                break
+            p = np.array([np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax)])
+            if all(np.hypot(*(p - q)) >= min_d for q in pts):
+                pts.append(p)
+        return np.array(pts) if pts else None
+
+    def paint_occluders(self, img, cam, occ):
+        """Projects every occluder (a vertical cylinder of person height) into camera `cam` of the original-size
+        image as a filled rectangle of height h and width occlusion_width_ratio * h. Labels are not changed."""
+        K = np.asarray(self.base.intrinsic_matrices[cam], dtype=np.float64)
+        Rt = np.asarray(self.base.extrinsic_matrices[cam], dtype=np.float64)
+        world_T_grid = np.asarray(self.base.worldcoord_from_worldgrid_mat, dtype=np.float64)
+        world_xy = (world_T_grid @ np.c_[occ, np.ones(len(occ))].T)[:2].T
+        foot = np.c_[world_xy, np.zeros(len(occ)), np.ones(len(occ))]
+        head = foot.copy()
+        head[:, 2] = self.occluder_height
+        z_sign = -1 if 'multiviewx' in self.base.__class__.__name__.lower() else 1  # as the model configs
+        draw = None
+        W, H = img.size
+        for f_pt, h_pt in zip(foot, head):
+            pf, ph = K @ Rt @ f_pt, K @ Rt @ h_pt
+            if z_sign * pf[2] <= 0 or z_sign * ph[2] <= 0:
+                continue  # behind the camera
+            uf, uh = pf[:2] / pf[2], ph[:2] / ph[2]
+            y1, y2 = min(uf[1], uh[1]), max(uf[1], uh[1])
+            w = self.occlusion_width_ratio * (y2 - y1)
+            cx = (uf[0] + uh[0]) / 2
+            x1, x2 = cx - w / 2, cx + w / 2
+            if x2 < 0 or y2 < 0 or x1 >= W or y1 >= H:
+                continue
+            if draw is None:
+                img = img.copy()
+                draw = ImageDraw.Draw(img)
+            draw.rectangle([max(x1, 0), max(y1, 0), min(x2, W - 1), min(y2, H - 1)], fill=OCCLUDER_RGB)
+        return img
+
     def get_image_data(self, frame, cameras):
         imgs, intrins, extrins = [], [], []
         centers, offsets, sizes, pids, valids = [], [], [], [], []
+        occluders = self.sample_occluders()  # one set per frame, shared by all views
         for cam in cameras:
             img = Image.open(self.img_fpaths[cam][frame]).convert('RGB')
+            if occluders is not None:
+                img = self.paint_occluders(img, cam, occluders)
             W, H = img.size
 
             resize_dims, crop = self.sample_augmentation()
@@ -255,6 +341,25 @@ class PedestrianDataset(VisionDataset):
         return torch.stack(imgs), torch.stack(intrins), torch.stack(extrins), torch.stack(centers), torch.stack(
             offsets), torch.stack(sizes), torch.stack(pids), torch.stack(valids)
 
+    # ------------------------------------------------------------ ARL A2: scene-level BEV augmentation (MVAug)
+    def sample_scene_transform(self):
+        """4x4 transform of the reference (BEV) frame that keeps the fixed BEV rectangle valid: one of the three
+        mirror flips about the grid centre, optionally with a small rotation and shift. Points that leave the grid
+        are dropped from the BEV target by get_bev_gt."""
+        xmin, xmax, ymin, ymax = self.bounds[:4]
+        c = np.array([(xmin + xmax) / 2, (ymin + ymax) / 2])
+        flips = [(-1, 1), (1, -1), (-1, -1)]
+        A = np.diag(flips[np.random.randint(len(flips))]).astype(np.float64)
+        t = np.zeros(2)
+        if self.scene_aug_mode == 'flip_affine':
+            th = np.deg2rad(np.random.uniform(-self.scene_aug_rot, self.scene_aug_rot))
+            A = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]]) @ A
+            t = np.random.uniform(-self.scene_aug_shift, self.scene_aug_shift, 2) / GRID_CELL_M
+        T = np.eye(4)
+        T[:2, :2] = A
+        T[:2, 3] = c + t - A @ c
+        return torch.tensor(T, dtype=torch.float32)
+
     def __len__(self):
         return len(self.world_gt.keys())
 
@@ -277,19 +382,27 @@ class PedestrianDataset(VisionDataset):
         worldgrid_pts_pre, world_pid_pre = self.world_gt[pre_frame]
 
         worldgrid_pts = torch.cat((worldgrid_pts_org, torch.zeros_like(worldgrid_pts_org[:, 0:1])), dim=1).unsqueeze(0)
-        worldgrid_pts_pre = torch.cat((worldgrid_pts_pre, torch.zeros_like(worldgrid_pts_pre[:, 0:1])), dim=1)
+        worldgrid_pts_pre = torch.cat((worldgrid_pts_pre, torch.zeros_like(worldgrid_pts_pre[:, 0:1])),
+                                      dim=1).unsqueeze(0)
 
+        augment = torch.eye(4)
         if self.is_train:
             Rz = torch.eye(3)
             scene_center = torch.tensor([0., 0., 0.], dtype=torch.float32)
             off = 0.25
             scene_center[:2].uniform_(-off, off)
             augment = geom.merge_rt(Rz.unsqueeze(0), -scene_center.unsqueeze(0)).squeeze()
+            if self.scene_aug_prob > 0 and np.random.rand() < self.scene_aug_prob:
+                augment = torch.matmul(self.sample_scene_transform(), augment)
             worldgrid_T_worldcoord = torch.matmul(augment, worldgrid_T_worldcoord)
             worldgrid_pts = geom.apply_4x4(augment.unsqueeze(0), worldgrid_pts)
+            # ARL fix: the previous-frame GT (target of the tracking offset) lives in the same reference frame
+            worldgrid_pts_pre = geom.apply_4x4(augment.unsqueeze(0), worldgrid_pts_pre)
+        # 2D part of the transform (raw reference -> augmented reference), used to align the temporal cache
+        scene_T = augment[[0, 1, 3]][:, [0, 1, 3]].clone()
 
         mem_pts = self.vox_util.Ref2Mem(worldgrid_pts, self.Y, self.Z, self.X)
-        mem_pts_pre = self.vox_util.Ref2Mem(worldgrid_pts_pre.unsqueeze(0), self.Y, self.Z, self.X)
+        mem_pts_pre = self.vox_util.Ref2Mem(worldgrid_pts_pre, self.Y, self.Z, self.X)
         center_bev, valid_bev, pid_bev, offset_bev = self.get_bev_gt(mem_pts, mem_pts_pre,  world_pids, world_pid_pre)
 
         grid_gt = torch.zeros((self.max_objects, 3), dtype=torch.long)
@@ -304,6 +417,7 @@ class PedestrianDataset(VisionDataset):
             'frame': frame // self.base.frame_step,
             'sequence_num': int(0),
             'grid_gt': grid_gt,
+            'scene_T': scene_T,  # 3,3
         }
 
         target = {

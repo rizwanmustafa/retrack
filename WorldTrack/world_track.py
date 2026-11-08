@@ -66,6 +66,8 @@ class WorldTrackModel(pl.LightningModule):
         self.max_cache = 32
         self.temporal_cache_frames = -2 * torch.ones(self.max_cache, dtype=torch.long)
         self.temporal_cache = None
+        # ARL: scene transform (raw reference -> augmented reference, 3x3) each cached BEV was computed in
+        self.temporal_cache_T = torch.eye(3).repeat(self.max_cache, 1, 1)
 
         # Test
         self.moda_gt_list, self.moda_pred_list = [], []
@@ -119,7 +121,12 @@ class WorldTrackModel(pl.LightningModule):
         ref_T_global: (B,4,4)
         vox_util: vox util object
         """
-        prev_bev = self.load_cache(item['frame'].cpu())
+        B = item['img'].shape[0]
+        scene_T = item.get('scene_T')
+        scene_T = torch.eye(3).repeat(B, 1, 1) if scene_T is None else scene_T.detach().float().cpu()
+        prev_bev, prev_T = self.load_cache(item['frame'].cpu())
+        if prev_bev is not None:
+            prev_bev = self.align_prev_bev(prev_bev, prev_T, scene_T)
         cam_mask = self.get_cam_mask(item)
         kwargs = {} if cam_mask is None else {'cam_mask': cam_mask}
 
@@ -134,7 +141,7 @@ class WorldTrackModel(pl.LightningModule):
         )
 
         if self.use_temporal_cache:
-            self.store_cache(item['frame'].cpu(), output['bev_raw'].clone().detach())
+            self.store_cache(item['frame'].cpu(), output['bev_raw'].clone().detach(), scene_T)
 
         return output
 
@@ -163,23 +170,26 @@ class WorldTrackModel(pl.LightningModule):
         return None
 
     def load_cache(self, frames):
+        """returns (BEV(t-1) for every frame of the batch, their scene transforms) or (None, None)"""
         idx = []
         for frame in frames:
             i = (frame - 1 == self.temporal_cache_frames).nonzero(as_tuple=True)[0]
             if i.nelement() == 1:
                 idx.append(i.item())
-        if len(idx) != len(frames):
-            return None
+        if len(idx) != len(frames) or self.temporal_cache is None:
+            return None, None
         else:
-            return self.temporal_cache[idx]
+            return self.temporal_cache[idx], self.temporal_cache_T[idx]
 
-    def store_cache(self, frames, bev_feat):
+    def store_cache(self, frames, bev_feat, scene_T=None):
         if self.temporal_cache is None:
             shape = list(bev_feat.shape)
             shape[0] = self.max_cache
             self.temporal_cache = torch.zeros(shape, device=bev_feat.device, dtype=bev_feat.dtype)
+        if scene_T is None:
+            scene_T = torch.eye(3).repeat(len(frames), 1, 1)
 
-        for frame, feat in zip(frames, bev_feat):
+        for frame, feat, T in zip(frames, bev_feat, scene_T):
             i = (frame - 1 == self.temporal_cache_frames).nonzero(as_tuple=True)[0]
             # Choose unfilled cache slot
             if i.nelement() == 0:
@@ -190,6 +200,32 @@ class WorldTrackModel(pl.LightningModule):
 
             self.temporal_cache[i[0]] = feat
             self.temporal_cache_frames[i[0]] = frame
+            self.temporal_cache_T[i[0]] = T
+
+    def align_prev_bev(self, prev_bev, prev_T, cur_T, tol_cells=0.5):
+        """
+        ARL A2 x A3: BEV(t-1) was computed in the reference frame prev_T (raw -> augmented reference coordinates,
+        B,3,3) and BEV(t) in cur_T. Resamples BEV(t-1) into the frame of BEV(t) so that history fusion sees
+        aligned features under scene augmentation. Without scene augmentation (test, or the baseline's sub-cell
+        shift) the frames agree to within `tol_cells` reference cells and BEV(t-1) is returned unchanged.
+        """
+        M = prev_T @ torch.inverse(cur_T)  # augmented(t) -> raw -> augmented(t-1)
+        if (M - torch.eye(3)).abs()[:, :2, :2].max() < 1e-6 and (M[:, :2, 2]).abs().max() < tol_cells:
+            return prev_bev
+        B, _, Yb, Xb = prev_bev.shape
+        dev = prev_bev.device
+        ys, xs = torch.meshgrid(torch.arange(Yb, device=dev, dtype=torch.float32) + 0.5,
+                                torch.arange(Xb, device=dev, dtype=torch.float32) + 0.5, indexing='ij')
+        mem = torch.stack([xs.flatten(), ys.flatten(), torch.zeros_like(xs.flatten())], -1)
+        mem = mem.unsqueeze(0).repeat(B, 1, 1)  # pixel centres of BEV(t), mem coords (x, y, z)
+        ref = self.vox_util.Mem2Ref(mem, self.Y, self.Z, self.X)
+        xy1 = torch.cat([ref[..., :2], torch.ones_like(ref[..., :1])], -1)
+        ref_prev = torch.cat([(xy1 @ M.to(dev).transpose(1, 2))[..., :2], ref[..., 2:3]], -1)
+        mem_prev = self.vox_util.Ref2Mem(ref_prev, self.Y, self.Z, self.X)
+        # BEV pixel i covers mem coordinates [i, i + 1) (as the BEV targets), hence align_corners=False
+        grid = torch.stack([mem_prev[..., 0] / Xb * 2 - 1, mem_prev[..., 1] / Yb * 2 - 1], -1).view(B, Yb, Xb, 2)
+        return torch.nn.functional.grid_sample(prev_bev, grid.to(prev_bev.dtype), mode='bilinear',
+                                               padding_mode='zeros', align_corners=False)
 
     def loss(self, target, output):
         center_e = output['instance_center']
