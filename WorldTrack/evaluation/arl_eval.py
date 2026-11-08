@@ -36,11 +36,14 @@ import numpy as np
 import pandas as pd
 import torch
 
-from evaluation.retrack_eval import (THRESHOLDS, load_model, load_test_items, run_inference, detection_metrics,
+from evaluation.retrack_eval import (load_model, load_test_items, run_inference, detection_metrics,
                                      tracking_metrics, hyps_metrics, pick_threshold)
 from tracking import offline
 
 SPLITS = {'test': (0.9, 1.0), 'val': (0.81, 0.9)}
+# B1 sweep, wider than Retrack's 0.20-0.75: in the quick run the best threshold of a strongly augmented model was
+# the lowest one tried
+THRESHOLDS = [round(t, 2) for t in np.arange(0.05, 0.76, 0.05)]
 
 # ------------------------------------------------------------------ parameter grids (METHODOLOGY.md §6)
 BYTE_DEFAULT = dict(tracker='byte', low_thres=0.1, track_buffer=10, low_match_thresh=50.)

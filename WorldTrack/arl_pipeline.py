@@ -191,6 +191,8 @@ def main():
     p.add_argument('--scene_p', type=float, default=0.5, help='A2 probability (MVAug best: 0.5)')
     p.add_argument('--scene_mode', default='flip', choices=['flip', 'flip_affine'])
     p.add_argument('--no_reid', action='store_true', help='skip the OSNet appearance switch R')
+    p.add_argument('--skip_val', action='store_true',
+                   help='diagnostics only: no validation models, so no clean protocol (oracle only), half the time')
     p.add_argument('--batch_size', type=int, default=2)
     p.add_argument('--accumulate', type=int, default=8)
     p.add_argument('--num_workers', type=int, default=min(8, os.cpu_count() or 2))
@@ -206,7 +208,7 @@ def main():
     results = osp.join(args.results, f'arl_{args.mode}')
     os.makedirs(results, exist_ok=True)
     write_env(results, args)
-    n_runs = len(args.variants) * (len(seeds) + 1)
+    n_runs = len(args.variants) * (len(seeds) + (0 if args.skip_val else 1))
     print(f'ARL pipeline: mode={args.mode} variants={args.variants} seeds={seeds} epochs={args.epochs} '
           f'-> {results}\n{n_runs} training runs ({len(args.variants)} variants x ({len(seeds)} seeds + 1 validation '
           f'model)); roughly 35 min each on an A100 at 30 epochs')
@@ -218,12 +220,12 @@ def main():
     clean = {}
     for si, seed in enumerate(seeds):
         for variant in args.variants:
-            if si == 0:
+            if si == 0 and not args.skip_val:
                 vck = train(variant, 'val', seed, data_dir, results, args)
                 vout = evaluate('val', vck, variant, seed, data_dir, results, args)
                 clean[variant] = osp.join(vout, 'params.json')
             ckpt = train(variant, 'standard', seed, data_dir, results, args)
-            evaluate('test', ckpt, variant, seed, data_dir, results, args, clean_params=clean[variant])
+            evaluate('test', ckpt, variant, seed, data_dir, results, args, clean_params=clean.get(variant))
             report_and_bundle(results)
 
     log('Report')

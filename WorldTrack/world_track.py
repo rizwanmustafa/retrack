@@ -214,18 +214,21 @@ class WorldTrackModel(pl.LightningModule):
             return prev_bev
         B, _, Yb, Xb = prev_bev.shape
         dev = prev_bev.device
-        ys, xs = torch.meshgrid(torch.arange(Yb, device=dev, dtype=torch.float32) + 0.5,
-                                torch.arange(Xb, device=dev, dtype=torch.float32) + 0.5, indexing='ij')
+        # BEV feature pixel i is the voxel centred at mem coordinate i (utils/vox.py: mem = (ref - min) / size - 0.5,
+        # and unproject_image_to_mem samples the voxels at integer mem coordinates)
+        ys, xs = torch.meshgrid(torch.arange(Yb, device=dev, dtype=torch.float32),
+                                torch.arange(Xb, device=dev, dtype=torch.float32), indexing='ij')
         mem = torch.stack([xs.flatten(), ys.flatten(), torch.zeros_like(xs.flatten())], -1)
         mem = mem.unsqueeze(0).repeat(B, 1, 1)  # pixel centres of BEV(t), mem coords (x, y, z)
         ref = self.vox_util.Mem2Ref(mem, self.Y, self.Z, self.X)
         xy1 = torch.cat([ref[..., :2], torch.ones_like(ref[..., :1])], -1)
         ref_prev = torch.cat([(xy1 @ M.to(dev).transpose(1, 2))[..., :2], ref[..., 2:3]], -1)
         mem_prev = self.vox_util.Ref2Mem(ref_prev, self.Y, self.Z, self.X)
-        # BEV pixel i covers mem coordinates [i, i + 1) (as the BEV targets), hence align_corners=False
-        grid = torch.stack([mem_prev[..., 0] / Xb * 2 - 1, mem_prev[..., 1] / Yb * 2 - 1], -1).view(B, Yb, Xb, 2)
+        # pixel centre i <-> mem coordinate i, hence align_corners=True
+        grid = torch.stack([mem_prev[..., 0] / max(Xb - 1, 1) * 2 - 1, mem_prev[..., 1] / max(Yb - 1, 1) * 2 - 1],
+                           -1).view(B, Yb, Xb, 2)
         return torch.nn.functional.grid_sample(prev_bev, grid.to(prev_bev.dtype), mode='bilinear',
-                                               padding_mode='zeros', align_corners=False)
+                                               padding_mode='zeros', align_corners=True)
 
     def loss(self, target, output):
         center_e = output['instance_center']
