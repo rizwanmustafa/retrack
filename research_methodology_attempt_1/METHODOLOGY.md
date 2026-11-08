@@ -106,6 +106,7 @@ These come from reading the repository. They are not assumptions, and they shape
 | view-coherent augmentation | MVDeTr [P03] §4.3 | removing it costs −2.0 MODA; adding it to MVDet +0.8 | 5-run p-values reported |
 | crop/resize + projection noise (vs none) | EarlyBird [P07] Tab. 3 | 77.8 → 89.5 | the baseline "suffers from strong overfitting" |
 | BEV history fusion | TrackTacular [P08] Tab. 4 | **MultiviewX only**: 95.4 → 96.5 MODA, IDF1 81.5 → 83.8, MOTA 90.0 → 87.9, MODP 89.8 → 75.0 | the motion head then lifts MOTA to 92.4 and IDF1 to 85.6 |
+| recurrent temporal BEV memory on TrackTacular | Visibility-Gated ConvGRU [P45] Tab. 3 (**WILDTRACK**) | plain ConvGRU: MODA 92.1 → 92.4, IDF1 95.3 → 96.3, MOTA 91.8 → 92.5; visibility-gated: 93.9 / 97.0 / 95.1; MODP drops (76.2 → 71.8) | baseline = TrackTacular paper numbers; single runs |
 | hybrid homography + volumetric fusion, ray conditioning | GRACE [P22] Tab. 1 | retrained TrackTacular 88.50 → **92.58** (7 cams) | 2026 arXiv paper |
 | 3D feature pulling + large-kernel refiner + foreground selector | MVFP [P21] ablation | 86.7 (Z = 1) → 92.3 (Z = 8) → 93.2 (+LKR) → 94.1 | voxel 10×10×20 cm, Z = 8 |
 | sparse projection + density weighting + per-view BEV loss | ATLASFusion [P17] Tab. 4 | 92.1 → 93.6 MODA, 95.3 → 95.9 IDF1 | baseline = TrackTacular paper numbers |
@@ -182,8 +183,9 @@ rectangle, so we restrict T_s to transforms that keep the area valid:
 
 **A3 — temporal BEV history** (TrackTacular's own mechanism [P08 §3.2]).
 Set `use_temporal_cache: True` for WILDTRACK and keep the `TemporalSampler`. This activates the `temporal_bev`
-fusion of BEV(t) with the cached BEV(t−1), which the WILDTRACK config disables today. The only quantitative
-evidence comes from MultiviewX [P08 Tab. 4]. There, history raised MODA and IDF1 but lowered MODP and MOTA, and the
+fusion of BEV(t) with the cached BEV(t−1), which the WILDTRACK config disables today. TrackTacular's own ablation is
+on MultiviewX [P08 Tab. 4]. On WILDTRACK, adding a recurrent temporal memory to TrackTacular raised MODA, MOTA and
+IDF1 in [P45 Tab. 3], with plain ConvGRU giving smaller gains than the visibility-gated version. Both lowered MODP. There, history raised MODA and IDF1 but lowered MODP and MOTA, and the
 motion head recovered MOTA. A3 is therefore a hypothesis tested in its own ablation row, not an expected gain. At
 test time the batch size must stay 1 so that BEV(t−1) is always cached [P08 §4.3 "Temporal Caching"].
 
@@ -331,7 +333,9 @@ three seeds, plus one validation model per configuration for the clean protocol,
 | detection threshold τ | 0.30–0.70, step 0.05 | Retrack Stage 1 |
 | low threshold τ_low | {0.1, 0.2, 0.3} | [P10]; [P22] uses τ − 0.2 |
 | track buffer (frames) | {5, 10} | B0 = 5; [P07], [P14] keep tracks 10 frames |
-| link window G_link | {3, 5, 10} frames | ours (1.5–5 s at 2 fps) |
+| link window G_link | {10, 20, 40} frames | ours; must exceed C1's track buffer (5–10 frames) |
+| link gate | {2.0, 3.0} m + 0.5 m per extra frame | ours; must exceed C1's match gate (1.875 m) — a 1 m gate found no links in the quick run |
+| C2b transition gate | {1.875, 2.5} m | 1.875 m = the online trackers' gate (`tracking/multitracker.py`) |
 | interpolation gap G | {1, 2, 3} frames | [P12] uses 20 frames at 30 fps; rescaled, ours |
 | appearance weight | λ = 0.98 in C1 (as [P07, P14, P16]); w_a ∈ {0, 0.5} in C2 | [P07 §3.5] |
 
@@ -367,7 +371,29 @@ three seeds, plus one validation model per configuration for the clean protocol,
 
 ---
 
-## 9. Implementation map (this repository)
+## 9. Closest prior work and what is new here
+
+A targeted search (November 2026) for "TrackTacular / WILDTRACK + occlusion or scene augmentation + temporal
+memory + offline linking / interpolation" found no paper that combines these, and none that tests each addition
+with add-one and leave-one-out ablations over seeds. That is evidence, not proof: an unpublished thesis or a very
+recent preprint could exist. The closest line of work is one group (Hotta lab, Meijo University). It modifies
+TrackTacular on WILDTRACK with one module per paper: GRACE [P22] (volumetric/homography fusion, ray conditioning,
+low-score track recovery), ATLASFusion [P17] (sparse projection, density weighting, per-view loss) and
+Visibility-Gated ConvGRU [P45] (temporal memory). Each compares a single run against the TrackTacular paper's
+numbers.
+
+| aspect | prior work | ARL attempt 1 |
+|---|---|---|
+| geometric augmentation consistent across views | 3DROM [P05], MVAug [P06]; both on homography (MVDet-style) detectors | the same ideas on a bilinear-sampling lifting model (TrackTacular), plus BEV-cache alignment so they can coexist with temporal history |
+| temporal history on WILDTRACK | [P45] (new recurrent module); [P08] (ablation on MultiviewX only) | TrackTacular's own mechanism switched on (no new module), tested with and without augmentation |
+| offline association | MVFlow + muSSP [P09], MCBLT [P19], StrongSORT AFLink/GSI [P12] (single-view) | exact tracklet path cover + GSI on top of TrackTacular's learned motion, plus a detection-level min-cost flow alternative |
+| protocol | mostly single runs vs published baselines; tuned on the test frames | retrained baseline, clean vs oracle tuning, 3 seeds, add-one + leave-one-out + marginal effects, rule fixed in advance |
+
+**Honest framing for a panel:** the components are known, on purpose, because each needs published evidence.
+The contribution is (a) the combination and the interactions it needs handled (scene transform × temporal cache ×
+tracking-offset target); (b) the evaluation protocol; and (c) the baseline issues found in the code (§2.2).
+
+## 10. Implementation map (this repository)
 
 | component | file(s) | change |
 |---|---|---|
@@ -430,6 +456,9 @@ under the list.
 | P40 | `40_clear_mot_bernardin2008.pdf` | Bernardin, Stiefelhagen, *Evaluating Multiple Object Tracking Performance: The CLEAR MOT Metrics*, EURASIP JIVP 2008 |
 | P41 | `41_ksp_berclaz2011.pdf` | Berclaz et al., *Multiple Object Tracking using K-Shortest Paths Optimization*, IEEE TPAMI 2011 |
 | P42 | `42_two_stage_mincost_flow_2311.02642.pdf` | Li, Jiang, *An Approach for Multi-Object Tracking with Two-Stage Min-Cost Flow*, arXiv 2311.02642 |
+| P43 | `43_arxiv_2602.00450.pdf` | Anderson et al., *Model Optimization for Multi-Camera 3D Detection and Tracking*, arXiv 2602.00450 (checked for overlap; deployment study of Sparse4D, not used) |
+| P44 | `44_mv_crowd_tracking_transformer_2604.19318.pdf` | Zhang et al., *Multi-view Crowd Tracking Transformer with View-Ground Interactions Under Large Real-World Scenes*, arXiv 2604.19318 (checked for overlap; criticises WILDTRACK's small test set) |
+| P45 | `45_visibility_gated_convgru_visapp2026.pdf` | Sakai, Nakamura, Shimizu, Hotta, *Visibility-Gated ConvGRU for Robust Multi-View Pedestrian Detection and Tracking in BEV Space*, VISAPP 2026, pp. 415–422 |
 
 **Not downloaded.** muSSP (Wang et al., NeurIPS 2019) could not be fetched: the NeurIPS proceedings servers
 timed out from this machine. Every muSSP number used here comes from MVFlow [P09], which ran muSSP on WILDTRACK

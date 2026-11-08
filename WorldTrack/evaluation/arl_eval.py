@@ -47,13 +47,17 @@ BYTE_DEFAULT = dict(tracker='byte', low_thres=0.1, track_buffer=10, low_match_th
 BYTE_GRID = [dict(BYTE_DEFAULT, low_thres=lo, track_buffer=buf) for lo in (0.1, 0.2, 0.3) for buf in (5, 10)]
 REID_DEFAULT = dict(use_reid=True, reid_lambda=0.98, reid_thresh=0.6)
 REID_GRID = [dict(REID_DEFAULT, reid_lambda=lam, reid_thresh=th) for lam in (0.9, 0.98) for th in (0.4, 0.6, 0.8)]
-LINK_DEFAULT = dict(max_gap=5, gate=1.0, gate_growth=0.5, w_m=1.0, w_t=0.1, w_a=0.0, c0=1.0)
-LINK_GRID = [dict(LINK_DEFAULT, max_gap=g, c0=c0, w_t=wt) for g in (3, 5, 10) for c0 in (0.5, 1.0, 2.0)
-             for wt in (0.0, 0.2)]
+# C2 must reach further than C1 to add anything: the online trackers already re-attach a lost track within their
+# track buffer (5-10 frames) and match gate (75 cells = 1.875 m, tracking/multitracker.py). The quick run showed that
+# a 1 m gate and gaps of <= 10 frames found no link at all, so the grid covers longer gaps and wider gates.
+LINK_DEFAULT = dict(max_gap=10, gate=2.0, gate_growth=0.5, w_m=1.0, w_t=0.1, w_a=0.0, c0=1.0)
+LINK_GRID = [dict(LINK_DEFAULT, max_gap=g, gate=gt, c0=c0, w_t=wt) for g in (10, 20, 40) for gt in (2.0, 3.0)
+             for c0 in (0.5, 1.0, 2.0) for wt in (0.0, 0.1)]
 LINK_APP = (0.25, 0.5, 1.0)
-FLOW_DEFAULT = dict(low_thr=0.1, max_skip=2, gate=1.0, gate_growth=0.5, c_b=1.0, w_t=0.2)
-FLOW_GRID = [dict(FLOW_DEFAULT, low_thr=lo, max_skip=k, c_b=cb) for lo in (0.1, 0.3) for k in (1, 2, 3)
-             for cb in (0.5, 1.0, 2.0)]
+# same gate as the online trackers (1.875 m); the quick run showed a 1 m gate fragments tracks
+FLOW_DEFAULT = dict(low_thr=0.1, max_skip=2, gate=1.875, gate_growth=0.5, c_b=1.0, w_t=0.2)
+FLOW_GRID = [dict(FLOW_DEFAULT, low_thr=lo, max_skip=k, gate=gt, c_b=cb) for lo in (0.1, 0.3) for k in (1, 3)
+             for gt in (1.875, 2.5) for cb in (0.5, 1.0, 2.0)]
 GSI_DEFAULT = dict(max_gap=2, tau=10.0, noise=0.01)
 GSI_GRID = [dict(max_gap=g, tau=0.0, noise=0.01) for g in (1, 2, 3)] + \
            [dict(max_gap=g, tau=tau, noise=nz) for g in (1, 2, 3) for tau in (3.0, 10.0) for nz in (0.01, 0.04)]

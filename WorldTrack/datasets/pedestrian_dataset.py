@@ -290,12 +290,17 @@ class PedestrianDataset(VisionDataset):
             w = self.occlusion_width_ratio * (y2 - y1)
             cx = (uf[0] + uh[0]) / 2
             x1, x2 = cx - w / 2, cx + w / 2
-            if x2 < 0 or y2 < 0 or x1 >= W or y1 >= H:
+            if not np.all(np.isfinite([x1, y1, x2, y2])):
+                continue  # point (almost) on the camera plane
+            # clip to the image; skip occluders that are outside it or degenerate after clipping
+            x1, y1 = int(round(max(x1, 0))), int(round(max(y1, 0)))
+            x2, y2 = int(round(min(x2, W - 1))), int(round(min(y2, H - 1)))
+            if x2 <= x1 or y2 <= y1:
                 continue
             if draw is None:
                 img = img.copy()
                 draw = ImageDraw.Draw(img)
-            draw.rectangle([max(x1, 0), max(y1, 0), min(x2, W - 1), min(y2, H - 1)], fill=OCCLUDER_RGB)
+            draw.rectangle([x1, y1, x2, y2], fill=OCCLUDER_RGB)
         return img
 
     def get_image_data(self, frame, cameras):

@@ -89,7 +89,9 @@ frame's transform and resamples the cached BEV into the current frame (`align_pr
 **Q8. TrackTacular already has temporal fusion. What's new?**
 For WILDTRACK it is switched off in the shipped config (`use_temporal_cache: False`, upstream commit `f17fa5b`).
 Its only published ablation is on MultiviewX, where it raised MODA and IDF1 but lowered MOTA [P08 Tab. 4].
-Switching it on for WILDTRACK is tested as a hypothesis (A3), not assumed to help.
+A 2026 paper did test temporal memory on TrackTacular on WILDTRACK and found gains (plain ConvGRU: MODA 92.1 → 92.4,
+IDF1 95.3 → 96.3, MOTA 91.8 → 92.5 [P45 Tab. 3]), but with a new recurrent module and single runs. ARL switches on
+TrackTacular's own mechanism and tests it with and without augmentation, over seeds.
 
 **Q9. Why ResNet-18? Bigger backbones usually help.**
 Not on WILDTRACK: EarlyBird measured ResNet-18 91.2 MODA vs ResNet-50 89.6 vs Swin-T 89.5 [P07 Tab. 4]. With 360
@@ -146,6 +148,13 @@ association is the planned attempt 2.
 WILDTRACK has been criticised for not having the consent of the people recorded; EarlyBird's authors mention it
 [P07, "Ethical Impact"]. Pedestrian tracking can also be misused for surveillance. Mention both briefly and note
 that MultiviewX is a synthetic alternative.
+
+**Q19b. Has someone already done exactly this?**
+Not that I could find. A targeted search found no paper combining these additions on TrackTacular, or testing each
+one with add-one and leave-one-out ablations over seeds (METHODOLOGY.md §9). The closest work is one group's
+series (GRACE, ATLASFusion, Visibility-Gated ConvGRU [P22, P17, P45]), which adds one new module per paper. Say
+clearly that the ingredients are known on purpose, and that the contribution is the combination, the interaction
+fixes and the protocol.
 
 **Q19. What would you do if nothing worked?**
 Report it. A DROP verdict on an addition that the literature reports as helpful is a useful finding about
@@ -262,6 +271,7 @@ Stage 5, and Stage 7.
 | online → offline, same detections | MOTA 89.5 → 92.6, IDF1 92.3 → 95.6 | [P19 Tab. 3] |
 | seed spread on WILDTRACK | about ±0.6–1.5 MODA, ±0.4–1.2 IDF1 | [P38 Tab. 1] |
 | best published tracking (2025) | MOTA 94.3, IDF1 96.5 | MVTrajecter [P16 Tab. 3] |
+| temporal memory on TrackTacular (2026) | MOTA 95.1, IDF1 97.0, MODA 93.9 | Visibility-Gated ConvGRU [P45] |
 
 ---
 

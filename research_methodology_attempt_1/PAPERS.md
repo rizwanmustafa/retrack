@@ -46,6 +46,9 @@ page. "Used for" names the table or section the methodology takes numbers from.
 | P40 | 40_clear_mot_bernardin2008.pdf | MOTA / MOTP definitions |
 | P41 | 41_ksp_berclaz2011.pdf | k-shortest-paths min-cost-flow formulation (C2b) |
 | P42 | 42_two_stage_mincost_flow_2311.02642.pdf | min-cost flow with muSSP in MOT |
+| P43 | 43_arxiv_2602.00450.pdf | novelty check only (Sparse4D deployment study; not the same method) |
+| P44 | 44_mv_crowd_tracking_transformer_2604.19318.pdf | novelty check; argues WILDTRACK's test set is small |
+| P45 | 45_visibility_gated_convgru_visapp2026.pdf | **A3** evidence on WILDTRACK (Tab. 3: temporal memory on TrackTacular); closest prior work |
 
 Not downloaded: **muSSP** (Wang et al., NeurIPS 2019). The NeurIPS servers timed out from this machine. Its
 WILDTRACK numbers are taken from P09, which ran it.
