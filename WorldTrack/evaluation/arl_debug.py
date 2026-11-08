@@ -110,7 +110,8 @@ def check_alignment(Y, Z, X, bounds):
     res['y_flip_error'] = float((WorldTrackModel.align_prev_bev(me, prev, eye, fy) - prev.flip(-2)).abs().max())
     res['flip_then_unflip_error'] = float(
         (WorldTrackModel.align_prev_bev(me, prev.flip(-1), fx, eye) - prev).abs().max())
-    res['ok'] = all(v < 1e-4 for k, v in res.items())
+    # float32 grid_sample rounding is ~1e-4 on these N(0,1) values; a one-pixel error would be ~1
+    res['ok'] = all(v < 1e-2 for k, v in res.items())
     return res
 
 
@@ -144,11 +145,14 @@ def main():
         rows[label] = {'mean_fraction_of_feet_inside_a_person_box': float(frac), 'samples': res}
         print(f'{label:13s} projected GT feet inside an annotated person box: {frac:.1%}  -> {d}')
     report['views'] = rows
+    # The samples of the different settings get different random crops (occlusion draws extra random numbers), so
+    # the fractions are not expected to be equal. An inconsistent scene transform would put the projected feet in
+    # mirrored / shifted places and the fraction would collapse far below the un-augmented one.
     ref = rows['none']['mean_fraction_of_feet_inside_a_person_box']
-    report['verdict'] = {k: ('OK' if abs(v['mean_fraction_of_feet_inside_a_person_box'] - ref) < 0.05 else
-                             'CHECK: differs from the un-augmented samples')
+    report['verdict'] = {k: ('OK' if v['mean_fraction_of_feet_inside_a_person_box'] >= 0.6 * ref else
+                             'CHECK: projected feet miss the people (inconsistent geometry?)')
                          for k, v in rows.items()}
-    print('verdict (should all be OK; occlusion does not move people):', report['verdict'])
+    print('verdict (should all be OK):', report['verdict'])
     json.dump(report, open(osp.join(args.out, 'arl_debug.json'), 'w'), indent=1)
 
 

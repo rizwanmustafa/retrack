@@ -210,8 +210,8 @@ def main():
     write_env(results, args)
     n_runs = len(args.variants) * (len(seeds) + (0 if args.skip_val else 1))
     print(f'ARL pipeline: mode={args.mode} variants={args.variants} seeds={seeds} epochs={args.epochs} '
-          f'-> {results}\n{n_runs} training runs ({len(args.variants)} variants x ({len(seeds)} seeds + 1 validation '
-          f'model)); roughly 35 min each on an A100 at 30 epochs')
+          f'-> {results}\n{n_runs} training runs ({len(args.variants)} variants x ({len(seeds)} seeds'
+          f'{"" if args.skip_val else " + 1 validation model"})); about 25 min each on an A100 at 30 epochs')
 
     log('Data')
     data_dir = prepare_wildtrack(args.data_root)
