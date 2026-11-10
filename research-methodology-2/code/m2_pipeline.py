@@ -15,6 +15,7 @@ Variants (see METHODOLOGY.md):
   M2c  same with GRACE's coverage prior instead of ours                          (is our prior worth it?)
   A2f  scene augmentation alone, with the batch-order fix                        (is VGF worth it?)
   VD   VGF + rays + view-diversity prior, no scene augmentation                  (is scene augmentation worth it?)
+  M2cx M2c trained with view mixing (attempt 1's batch order, on purpose)        (does the "bug" add to VGF?)
 """
 import argparse
 import glob
@@ -31,10 +32,11 @@ HERE = osp.dirname(osp.abspath(__file__))
 WORLDTRACK = osp.normpath(osp.join(HERE, '..', '..', 'WorldTrack'))
 
 VARIANTS = {
-    'M2': dict(scene=True, vgf=True, ray=True, prior='diversity'),
-    'M2c': dict(scene=True, vgf=True, ray=True, prior='coverage'),
-    'A2f': dict(scene=True, vgf=False, ray=False, prior='diversity'),
-    'VD': dict(scene=False, vgf=True, ray=True, prior='diversity'),
+    'M2': dict(scene=True, vgf=True, ray=True, prior='diversity', mix=False),
+    'M2c': dict(scene=True, vgf=True, ray=True, prior='coverage', mix=False),
+    'A2f': dict(scene=True, vgf=False, ray=False, prior='diversity', mix=False),
+    'VD': dict(scene=False, vgf=True, ray=True, prior='diversity', mix=False),
+    'M2cx': dict(scene=True, vgf=True, ray=True, prior='coverage', mix=True),
 }
 
 
@@ -51,6 +53,7 @@ def train_cmd(variant, seed, run_dir, data_dir, args, epochs, extra=()):
             '--model.vgf', str(v['vgf']).lower(),
             '--model.ray_cond', str(v['ray']).lower(),
             '--model.vgf_prior', v['prior'],
+            '--model.view_mix', str(v['mix']).lower(),
             '--data.init_args.data_dir', data_dir,
             '--data.init_args.split', 'standard',
             '--data.init_args.occlusion_prob', '0.0',

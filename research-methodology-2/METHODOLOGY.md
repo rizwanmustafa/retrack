@@ -228,6 +228,39 @@ test frames. This is the cell `thr0.5|tt`, the same protocol the paper uses.
 
 See [`RUN.md`](RUN.md).
 
+## 8. Screening results, seed 80085 (2026-11-10), and amendment 1
+
+All runs use the primary protocol (`thr0.5|tt`), commit 73e1ed1, an A100, and about 24 min of training each.
+
+| run | MODA | MOTA | IDF1 | det FN / FP | tracker misses / FP |
+|---|---|---|---|---|---|
+| TrackTacular paper [P01 Tab. 1–2] | 92.10 | 91.80 | 95.30 | – | – |
+| attempt-1 E0 (retrained TrackTacular) | 90.76 | 89.08 | 93.40 | 47 / 41 | – |
+| attempt-1 A2 (scene aug, old batch order) | 92.02 | 92.65 | 95.42 | 53 / 23 | – |
+| A2f (scene aug, fixed order) | 91.49 | 90.76 | 94.51 | 45 / 36 | 44 / 36 |
+| M2 (A2f + VGF + rays + diversity prior) | 91.70 | 90.13 | 94.55 | 45 / 34 | 41 / 45 |
+| M2c (A2f + VGF + rays + coverage prior) | 92.23 | 89.92 | 94.61 | 34 / 40 | 42 / 49 |
+
+All three are screening results under the §4 rule, from one seed each.
+
+- **H1:** only M2c is above 92.1, by 0.13 (one detection), so this is inconclusive. **H2:** not met by any run.
+- **H3, not promising.** M2 − M2c is −0.53 MODA, +0.21 MOTA, −0.06 IDF1. GRACE's coverage prior detects better than our diversity prior.
+- **H4, mixed.** VGF with the coverage prior gives +0.74 MODA over A2f, mainly from 11 fewer misses. But it gives −0.84 MOTA. With VGF the TrackTacular tracker makes more false positives than the detector does (49 vs 40), while A2f has 36 vs 36. That tracker matches each detection's predicted previous position to the existing tracks (`tracking/multitracker.py:216–218`), so the offset head is the likely cause. This has not been verified.
+- **H5, reversed.** A2f is below attempt-1 A2 on every metric: −0.53 MODA, −1.89 MOTA, −0.90 IDF1. Its MOTA is also below all three A2 seeds (91.49, 92.44, 92.65).
+  - The two training configs are identical apart from the seed and paths (a diff of `config.yaml` is empty).
+  - With VGF off, the code path differs only by the order fix.
+  - The old order therefore behaved like a useful augmentation. With batch 2, cameras 1, 3 and 5 of each sample are lifted in the other sample's scene-augmented frame while the targets stay put.
+  - The "same seed" pairing only fixes the data order. GPU nondeterminism remains, so this needs a second seed.
+
+**Amendment 1 (post hoc).** This hypothesis came from the data above, so it must be confirmed on new runs. It has not
+yet been checked against the literature for novelty.
+
+- **H6:** view mixing (`--model.view_mix true`, training only) adds to M2c's detection gain.
+  - Test: M2cx − M2c at seed 80085.
+  - Confirmation: A2f vs attempt-1 A2 at seed 2.
+
+`view_mix` reproduces attempt 1's order exactly and has no effect at test time.
+
 ## References
 
 See [`PAPERS.md`](PAPERS.md). Each PDF is in [`papers/`](papers/) (kept locally, not in git).

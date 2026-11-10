@@ -38,7 +38,8 @@ BASELINE_NAMES = {'base': 'attempt 1: retrained TrackTacular (E0)',
 NEW_NAMES = {'M2': 'M2 (proposed): scene aug + VGF + rays + diversity prior',
              'M2c': 'M2c: as M2 with GRACE coverage prior',
              'A2f': 'A2f: scene aug only, bug fixed',
-             'VD': 'VD: VGF + rays + diversity prior, no scene aug'}
+             'VD': 'VD: VGF + rays + diversity prior, no scene aug',
+             'M2cx': 'M2cx: M2c + view mixing (old batch order on purpose)'}
 
 
 def md_table(df):
@@ -119,7 +120,9 @@ def main():
     lines += ['', '## Ablations, same seed (primary protocol, METHODOLOGY.md §4)', '']
     for a, b, h in (('M2', 'M2c', 'H3: view-diversity prior vs GRACE coverage prior'),
                     ('M2', 'A2f', 'H4: VGF + rays on top of scene augmentation'),
-                    ('M2', 'VD', 'share of scene augmentation')):
+                    ('M2', 'VD', 'share of scene augmentation'),
+                    ('M2c', 'A2f', 'VGF + rays (coverage prior) on top of scene augmentation'),
+                    ('M2cx', 'M2c', 'view mixing on top of M2c')):
         for seed in sorted(set(prim[prim.variant == a].seed) & set(prim[prim.variant == b].seed)):
             ra = prim[(prim.variant == a) & (prim.seed == seed)].iloc[0]
             rb = prim[(prim.variant == b) & (prim.seed == seed)].iloc[0]

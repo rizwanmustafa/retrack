@@ -28,7 +28,8 @@ class Segnet(nn.Module):
                  fusion_hidden_dim=16,
                  vgf=False,
                  ray_cond=False,
-                 vgf_prior='diversity'):
+                 vgf_prior='diversity',
+                 view_mix=False):
         """
         Research methodology 2 (research-methodology-2/METHODOLOGY.md), all off by default:
         vgf:       volumetric-guided fusion of this (volumetric) BEV feature with a homography-projected one, GRACE Eq. 3-5
@@ -36,6 +37,9 @@ class Segnet(nn.Module):
                    The rays are computed per sample in the (scene-augmented) reference frame.
         vgf_prior: fixed half of the VGF gate. 'coverage' = GRACE Eq. 4 (fraction of cameras seeing the cell),
                    'diversity' = ours (spread of the viewing directions of the cameras seeing the cell)
+        view_mix:  training only. Reproduces on purpose the old repeat() order: with batch 2, cameras 1, 3, 5 of each
+                   sample are lifted in the other sample's (scene-augmented) reference frame while the targets stay.
+                   Attempt 1's A2 trained this way and tracked better than the fixed A2f (research-methodology-2)
         """
         super(Segnet, self).__init__()
         assert (encoder_type in ['res101', 'res50', 'effb0', 'effb4', 'res18', 'vgg11', 'swin_t'])
@@ -57,6 +61,7 @@ class Segnet(nn.Module):
         self.vgf = vgf
         self.ray_cond = ray_cond
         self.vgf_prior = vgf_prior
+        self.view_mix = view_mix
 
         self.register_buffer('mean', torch.as_tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1), persistent=False)
         self.register_buffer('std', torch.as_tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1), persistent=False)
@@ -161,7 +166,9 @@ class Segnet(nn.Module):
         global_T_cams_ = torch.inverse(cams_T_global_)  # B*S,4,4
         # repeat_interleave matches pack_seqdim's b-major order; repeat() gave camera i the frame of sample i % B,
         # which mattered once samples of a batch have different (scene-augmented) reference frames
-        ref_T_cams = torch.matmul(ref_T_global.repeat_interleave(S, dim=0), global_T_cams_)  # B*S,4,4
+        ref_T_cams_global = ref_T_global.repeat(S, 1, 1) if (self.view_mix and self.training) \
+            else ref_T_global.repeat_interleave(S, dim=0)
+        ref_T_cams = torch.matmul(ref_T_cams_global, global_T_cams_)  # B*S,4,4
         cams_T_ref_ = torch.inverse(ref_T_cams)  # B*S,4,4
 
         # rgb encoder
