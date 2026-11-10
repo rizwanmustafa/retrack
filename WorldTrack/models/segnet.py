@@ -5,9 +5,12 @@ import utils.geom
 import utils.vox
 import utils.basic
 
+from kornia.geometry.transform.imgwarp import warp_perspective
 from models.encoder import Encoder_res101, Encoder_res50, Encoder_res18, Encoder_eff, Encoder_swin_t
 from models.decoder import Decoder
-from models.fusion import FUSION_MODES, CameraScorer, fuse_views, coverage_map
+from models.fusion import FUSION_MODES, CameraScorer, fuse_views, coverage_map, view_diversity
+
+VGF_PRIORS = ('coverage', 'diversity')
 
 
 class Segnet(nn.Module):
@@ -22,10 +25,25 @@ class Segnet(nn.Module):
                  encoder_type='swin_t',
                  fusion='concat',
                  coverage_map=False,
-                 fusion_hidden_dim=16):
+                 fusion_hidden_dim=16,
+                 vgf=False,
+                 ray_cond=False,
+                 vgf_prior='diversity'):
+        """
+        Research methodology 2 (research-methodology-2/METHODOLOGY.md), all off by default:
+        vgf:       volumetric-guided fusion of this (volumetric) BEV feature with a homography-projected one, GRACE Eq. 3-5
+        ray_cond:  each camera's ground-plane viewing direction is appended to its lifted features, GRACE Eq. 6-8.
+                   The rays are computed per sample in the (scene-augmented) reference frame.
+        vgf_prior: fixed half of the VGF gate. 'coverage' = GRACE Eq. 4 (fraction of cameras seeing the cell),
+                   'diversity' = ours (spread of the viewing directions of the cameras seeing the cell)
+        """
         super(Segnet, self).__init__()
         assert (encoder_type in ['res101', 'res50', 'effb0', 'effb4', 'res18', 'vgg11', 'swin_t'])
         assert fusion in FUSION_MODES
+        assert vgf_prior in VGF_PRIORS, vgf_prior
+        if vgf:
+            assert fusion == 'concat' and num_cameras is not None, 'VGF is implemented for the concat fusion only'
+            assert not rand_flip, 'VGF does not flip the homography branch'
 
         self.Y, self.Z, self.X = Y, Z, X
         self.do_rgbcompress = do_rgbcompress
@@ -36,6 +54,9 @@ class Segnet(nn.Module):
         self.num_cameras = num_cameras
         self.fusion = fusion
         self.use_coverage = coverage_map
+        self.vgf = vgf
+        self.ray_cond = ray_cond
+        self.vgf_prior = vgf_prior
 
         self.register_buffer('mean', torch.as_tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1), persistent=False)
         self.register_buffer('std', torch.as_tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1), persistent=False)
@@ -65,6 +86,27 @@ class Segnet(nn.Module):
             )
         if self.fusion == 'weighted':
             self.cam_scorer = CameraScorer(feat2d_dim, fusion_hidden_dim, spatial_dims=3)
+
+        # Ray conditioning: rho of GRACE Eq. 7, shared by all cameras. Initialised to pass the image features through
+        # unchanged (ray weights zero), so training starts from the baseline fusion.
+        if self.ray_cond:
+            self.ray_rho = nn.Conv3d(feat2d_dim + 2, feat2d_dim, kernel_size=1)
+            with torch.no_grad():
+                self.ray_rho.weight.zero_()
+                self.ray_rho.weight[:, :feat2d_dim, 0, 0, 0] = torch.eye(feat2d_dim)
+                self.ray_rho.bias.zero_()
+
+        # VGF: homography-projected branch H (MVDet projection, fused by concatenation like models/mvdet.py) and the
+        # learned gate of GRACE Eq. 3, zero-initialised so the learned half starts at 0.5
+        if self.vgf:
+            self.hom_compressor = nn.Sequential(
+                nn.Conv2d(feat2d_dim * self.num_cameras, latent_dim, kernel_size=3, padding=1, stride=1),
+                nn.InstanceNorm2d(latent_dim), nn.ReLU(),
+                nn.Conv2d(latent_dim, latent_dim, kernel_size=1),
+            )
+            self.vgf_gate = nn.Conv2d(latent_dim * 2 + 1, 1, kernel_size=1)
+            nn.init.zeros_(self.vgf_gate.weight)
+            nn.init.zeros_(self.vgf_gate.bias)
 
         self.bev_compressor = nn.Sequential(
             nn.Conv2d(self.feat2d_dim * self.Z + int(self.use_coverage), latent_dim, kernel_size=3, padding=1),
@@ -117,7 +159,9 @@ class Segnet(nn.Module):
         cams_T_global_ = __p(cams_T_global)  # B*S,4,4
 
         global_T_cams_ = torch.inverse(cams_T_global_)  # B*S,4,4
-        ref_T_cams = torch.matmul(ref_T_global.repeat(S, 1, 1), global_T_cams_)  # B*S,4,4
+        # repeat_interleave matches pack_seqdim's b-major order; repeat() gave camera i the frame of sample i % B,
+        # which mattered once samples of a batch have different (scene-augmented) reference frames
+        ref_T_cams = torch.matmul(ref_T_global.repeat_interleave(S, dim=0), global_T_cams_)  # B*S,4,4
         cams_T_ref_ = torch.inverse(ref_T_cams)  # B*S,4,4
 
         # rgb encoder
@@ -146,6 +190,14 @@ class Segnet(nn.Module):
             xyz_refA=None, z_sign=self.z_sign, return_valid=True)
         feat_mems = __u(feat_mems_)  # B, S, C, Y, Z, X
         valid_mems = __u(valid_mems_)  # B, S, 1, Y, Z, X
+
+        rays = None
+        if self.ray_cond or (self.vgf and self.vgf_prior == 'diversity'):
+            rays = self.ground_rays(ref_T_cams, vox_util, B, S)  # B, S, 2, Y, X
+        if self.ray_cond:
+            ray_mems = rays.unsqueeze(4).expand(-1, -1, -1, -1, Z, -1)  # B, S, 2, Y, Z, X
+            feat_mems_ = self.ray_rho(__p(torch.cat([feat_mems, ray_mems.to(feat_mems.dtype)], dim=2)))
+            feat_mems = __u(feat_mems_) * valid_mems  # cells a camera does not see stay zero
 
         # rgb_cams_raw = rgb_cams_ * self.std.to(device) + self.mean.to(device)
         # rgb_mem_ = vox_util.unproject_image_to_mem(
@@ -180,6 +232,10 @@ class Segnet(nn.Module):
             feat_bev_ = torch.cat([feat_bev_, coverage.to(feat_bev_.dtype)], dim=1)
         feat_bev = self.bev_compressor(feat_bev_)
 
+        if self.vgf:
+            feat_bev = self.volumetric_guided_fusion(feat_bev, feat_cams_, featpix_T_cams_, cams_T_ref_, vox_util,
+                                                     mask_mems, rays, cam_mask, B)
+
         if prev_bev is None:
             prev_bev = feat_bev
         feat_bev = torch.cat([feat_bev, prev_bev], dim=1)
@@ -191,3 +247,35 @@ class Segnet(nn.Module):
             out_dict['coverage'] = coverage
 
         return out_dict
+
+    def ground_rays(self, ref_T_cams, vox_util, B, S):
+        """GRACE Eq. 6: unit ground-plane direction from each camera centre to every BEV cell, B,S,2,Y,X.
+        Computed from the current reference frame, so a scene-augmented (flipped) frame gets flipped rays."""
+        Y, Z, X = self.Y, self.Z, self.X
+        xyz_mem = utils.basic.gridcloud3d(1, Y, 1, X, norm=False, device=ref_T_cams.device)  # 1, Y*X, 3 (z = 0)
+        xy_ref = vox_util.Mem2Ref(xyz_mem, Y, Z, X)[..., :2]  # 1, Y*X, 2
+        d = xy_ref - ref_T_cams[:, None, :2, 3]  # B*S, Y*X, 2
+        r = d / d.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+        return r.reshape(B, S, Y, X, 2).permute(0, 1, 4, 2, 3)
+
+    def volumetric_guided_fusion(self, V, feat_cams_, featpix_T_cams_, cams_T_ref_, vox_util, mask_mems, rays,
+                                 cam_mask, B):
+        """GRACE Eq. 3-5 with our choice of prior: Z = g V + (1 - g) H, g = 1/2 sigma(conv(H, V, p)) + 1/2 (1 - p)."""
+        Y, Z, X = self.Y, self.Z, self.X
+        __u = lambda x: utils.basic.unpack_seqdim(x, B)
+        # homography branch: ground-plane projection of every camera, as models/mvdet.py
+        featpix_T_ref_ = torch.matmul(featpix_T_cams_[:, :3, :3], cams_T_ref_[:, :3, [0, 1, 3]])  # B*S,3,3
+        ref_T_mem = vox_util.get_ref_T_mem(1, Y, Z, X, device=V.device)[0, [0, 1, 3]][:, [0, 1, 3]]  # 3,3
+        mem_T_featpix = torch.inverse(torch.matmul(featpix_T_ref_, ref_T_mem))  # B*S,3,3
+        hom_mems = __u(warp_perspective(feat_cams_, mem_T_featpix, (Y, X), align_corners=False))  # B,S,C,Y,X
+        ones_ = torch.ones_like(feat_cams_[:, :1])
+        hom_valid = __u((warp_perspective(ones_, mem_T_featpix, (Y, X), align_corners=False) > 0.5).float())
+        H, _ = fuse_views(hom_mems, hom_valid, cam_mask, 'concat', cam_compressor=self.hom_compressor)  # B,latent,Y,X
+
+        if self.vgf_prior == 'coverage':
+            p = coverage_map(mask_mems, height_dim=3)  # B,1,Y,X, GRACE's m
+        else:
+            p = view_diversity(rays, mask_mems.float().mean(dim=4))  # B,1,Y,X
+        p = p.to(V.dtype)
+        g = 0.5 * torch.sigmoid(self.vgf_gate(torch.cat([H, V, p], dim=1))) + 0.5 * (1 - p)
+        return g * V + (1 - g) * H

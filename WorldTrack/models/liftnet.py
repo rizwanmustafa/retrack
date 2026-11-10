@@ -153,7 +153,7 @@ class Liftnet(nn.Module):
         pix_T_cams_ = __p(pix_T_cams)
         cams_T_global_ = __p(cams_T_global)  # B*S,4,4
         global_T_cams_ = torch.inverse(cams_T_global_)  # B*S,4,4
-        ref_T_cams = torch.matmul(ref_T_global.repeat(S, 1, 1), global_T_cams_)  # B*S,4,4
+        ref_T_cams = torch.matmul(ref_T_global.repeat_interleave(S, dim=0), global_T_cams_)  # B*S,4,4
         cams_T_ref_ = torch.inverse(ref_T_cams)  # B*S,4,4
 
         # rgb encoder

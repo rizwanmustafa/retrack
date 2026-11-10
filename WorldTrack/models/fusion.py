@@ -106,3 +106,17 @@ def coverage_map(mask_mems, height_dim=None):
     if height_dim is not None:
         cov = cov.mean(dim=height_dim)
     return cov
+
+
+def view_diversity(rays, weights):
+    """
+    Research methodology 2: spread of the viewing directions of the cameras that see a ground cell,
+    d(x, y) = 1 - || sum_n w_n r_n || / sum_n w_n, with r_n the unit ground-plane ray of camera n and w_n its
+    visibility. 0 for a single camera or cameras looking the same way (their homography "shadows" overlap),
+    larger when the cameras look from different directions (the shadows only meet at the foot point).
+    rays: B,S,2,Y,X, weights: B,S,1,Y,X in [0, 1]; returns B,1,Y,X (0 where no camera sees the cell)
+    """
+    weights = weights.float()
+    total = weights.sum(dim=1)  # B,1,Y,X
+    resultant = (weights * rays.float()).sum(dim=1).norm(dim=1, keepdim=True)  # B,1,Y,X
+    return torch.where(total > EPS, 1 - resultant / total.clamp(min=EPS), torch.zeros_like(total)).clamp(0, 1)
