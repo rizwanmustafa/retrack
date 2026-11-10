@@ -116,8 +116,18 @@ def main():
                     lines.append(f'- {variant} s{seed} vs attempt-1 {b} s{seed}: ' + ', '.join(
                         f'{m.upper()} {row[m] - ref[m]:+.2f}' for m in PRIMARY) +
                         f' (FN {int(row.det_fn)} vs {int(ref.det_fn)}, FP {int(row.det_fp)} vs {int(ref.det_fp)})')
+    lines += ['', '## Ablations, same seed (primary protocol, METHODOLOGY.md §4)', '']
+    for a, b, h in (('M2', 'M2c', 'H3: view-diversity prior vs GRACE coverage prior'),
+                    ('M2', 'A2f', 'H4: VGF + rays on top of scene augmentation'),
+                    ('M2', 'VD', 'share of scene augmentation')):
+        for seed in sorted(set(prim[prim.variant == a].seed) & set(prim[prim.variant == b].seed)):
+            ra = prim[(prim.variant == a) & (prim.seed == seed)].iloc[0]
+            rb = prim[(prim.variant == b) & (prim.seed == seed)].iloc[0]
+            lines.append(f'- {h}: {a} - {b}, s{seed}: ' + ', '.join(
+                f'{m.upper()} {ra[m] - rb[m]:+.2f}' for m in PRIMARY) +
+                f' (FN {int(ra.det_fn)} vs {int(rb.det_fn)}, FP {int(ra.det_fp)} vs {int(rb.det_fp)})')
     lines += ['', '## Error counts (primary protocol)', '',
-              prim[['variant', 'seed', 'det_fn', 'det_fp', 'id_switches', 'moda', 'mota', 'idf1']]
+              prim[['variant', 'seed', 'det_fn', 'det_fp', 'trk_misses', 'trk_fp', 'id_switches', 'moda', 'mota', 'idf1']]
               .sort_values(['variant', 'seed']).pipe(md_table), '']
 
     text = '\n'.join(lines)
