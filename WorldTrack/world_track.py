@@ -41,6 +41,7 @@ class WorldTrackModel(pl.LightningModule):
             ray_cond=False,
             vgf_prior='diversity',  # 'coverage' (GRACE) | 'diversity' (ours)
             view_mix=False,  # training only: some cameras lifted in the other sample's frame (the old repeat() order)
+            view_mix_random=0.0,  # training only: per-camera probability of the partner's frame (random view mixing)
             cam_dropout_prob=0.0,  # probability that a training sample has cameras switched off
             cam_dropout_max=3,  # at most this many cameras are switched off per sample
             test_drop_cams: Optional[List[int]] = None,  # cameras switched off at test time
@@ -94,13 +95,13 @@ class WorldTrackModel(pl.LightningModule):
         # Model
         num_cameras = None if num_cameras == 0 else num_cameras
         fusion_kwargs = dict(fusion=fusion, coverage_map=coverage_map, fusion_hidden_dim=fusion_hidden_dim)
-        assert model_name == 'segnet' or not (vgf or ray_cond or view_mix), \
+        assert model_name == 'segnet' or not (vgf or ray_cond or view_mix or view_mix_random), \
             'vgf / ray_cond / view_mix are implemented for segnet only'
         if model_name == 'segnet':
             self.model = Segnet(self.Y, self.Z, self.X, num_cameras=num_cameras, feat2d_dim=feat2d_dim,
                                 encoder_type=self.encoder_name, num_classes=num_classes, z_sign=z_sign,
                                 vgf=vgf, ray_cond=ray_cond, vgf_prior=vgf_prior, view_mix=view_mix,
-                                **fusion_kwargs)
+                                view_mix_random=view_mix_random, **fusion_kwargs)
         elif model_name == 'liftnet':
             self.model = Liftnet(self.Y, self.Z, self.X, encoder_type=self.encoder_name, feat2d_dim=feat2d_dim,
                                  DMIN=self.DMIN, DMAX=self.DMAX, D=self.D, num_classes=num_classes, z_sign=z_sign,

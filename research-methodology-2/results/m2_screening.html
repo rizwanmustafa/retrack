@@ -1,0 +1,452 @@
+<title>WILDTRACK M2 Screening</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column of lab-report sections (verdicts, then charts, then the next run), charts full column width */
+:root {
+  --bg: #f6f7f8;
+  --surface: #fcfcfb;
+  --ink: #0f1419;
+  --ink-2: #4a525c;
+  --ink-3: #737b85;
+  --rule: #dde1e6;
+  --grid: #e9ecef;
+  --ref: #0f1419;
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --good: #0ca30c;
+  --warn: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --code-bg: #eef1f4;
+  --font-display: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416; --surface: #1a1a19; --ink: #eef0f2; --ink-2: #b9c0c8; --ink-3: #8b939c;
+    --rule: #2c3136; --grid: #262a2e; --ref: #eef0f2;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --code-bg: #20252a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121416; --surface: #1a1a19; --ink: #eef0f2; --ink-2: #b9c0c8; --ink-3: #8b939c;
+  --rule: #2c3136; --grid: #262a2e; --ref: #eef0f2;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --code-bg: #20252a;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 32px 64px; display: grid; gap: 40px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(28px, 4.2vw, 40px); line-height: 1.12; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 24px; line-height: 1.2; margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 68ch; }
+.lede { font-size: 17px; color: var(--ink-2); }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+.num { font-variant-numeric: tabular-nums; }
+section { display: grid; gap: 14px; min-width: 0; }
+.sub { color: var(--ink-2); }
+
+.verdicts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+.verdict { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: start; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); min-width: 0; }
+.verdict .h { font-family: var(--font-mono); font-weight: 500; font-size: 13px; color: var(--ink-2); padding-top: 2px; }
+.verdict .t { font-weight: 600; }
+.verdict .d { grid-column: 2; color: var(--ink-2); font-size: 14px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 1px 8px 1px 6px; border-radius: 999px; border: 1px solid var(--rule); color: var(--ink); margin-left: 6px; vertical-align: 1px; white-space: nowrap; }
+.pill i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.pill.good i { background: var(--good); }
+.pill.warn i { background: var(--warn); }
+.pill.serious i { background: var(--serious); }
+.pill.critical i { background: var(--critical); }
+.pill.next i { background: transparent; border: 1.5px solid var(--ink-3); }
+
+.chart { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; position: relative; min-width: 0; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-2); margin-bottom: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend .sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.legend .ln { width: 18px; height: 0; border-top: 2px dashed var(--ref); display: inline-block; }
+.legend .hollow { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--ink-3); display: inline-block; }
+.legend .dia { width: 8px; height: 8px; background: var(--ink-2); transform: rotate(45deg); display: inline-block; }
+.caption { font-size: 14px; color: var(--ink-2); }
+.axis text, .lbl { fill: var(--ink-2); font-family: var(--font-body); font-size: 12px; }
+.axis line, .axis path { stroke: var(--rule); }
+.gridline { stroke: var(--grid); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 13px; padding: 6px 9px; border-radius: 6px; white-space: nowrap; z-index: 2; font-variant-numeric: tabular-nums; }
+.tip b { font-weight: 600; }
+
+.next { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+.codebox { position: relative; }
+pre { margin: 0; background: var(--code-bg); border-radius: 6px; padding: 14px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; color: var(--ink); }
+button { font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { border-color: var(--ink-3); }
+button:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+.codebox button { position: absolute; top: 8px; right: 8px; }
+ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 4px; max-width: 72ch; color: var(--ink-2); }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-weight: 600; color: var(--ink-2); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
+tbody tr:last-child td { border-bottom: 0; }
+tr.ref td { color: var(--ink-2); }
+.key { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
+footer { color: var(--ink-3); font-size: 13px; display: grid; gap: 4px; }
+@media (prefers-reduced-motion: no-preference) { .dot { transition: r 120ms ease; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Research methodology 2 · WILDTRACK test frames 360–399 · seed 80085</div>
+    <h1>Screening results: A2f, M2 and M2c against TrackTacular</h1>
+    <p class="lede">None of the three runs beats the paper yet. Our new fusion module helps detection when it uses GRACE's coverage prior, but it costs tracking. The bug fix turned out to hurt scene augmentation, which points to the next experiment.</p>
+    <p class="sub">The protocol is the paper's: threshold 0.5, TrackTacular's tracker, last epoch, nothing tuned on the test frames (cell <span class="mono">thr0.5|tt</span>). There are 952 ground-truth detections, so one error moves a metric by about 0.105 points.</p>
+  </header>
+
+  <section id="hypotheses">
+    <h2>Hypotheses</h2>
+    <div class="verdicts">
+      <div class="verdict"><span class="h">H1</span><span class="t">Beat MODA 92.1 <span class="pill warn"><i></i>Inconclusive</span></span><span class="d">Only M2c is above, at 92.23 (+0.13, one detection). That is far inside seed noise.</span></div>
+      <div class="verdict"><span class="h">H2</span><span class="t">MOTA ≥ 91.8 and IDF1 ≥ 95.3 <span class="pill critical"><i></i>Not met</span></span><span class="d">The best new MOTA is 90.76 (A2f) and the best IDF1 is 94.61 (M2c).</span></div>
+      <div class="verdict"><span class="h">H3</span><span class="t">Our diversity prior beats GRACE's coverage prior <span class="pill critical"><i></i>Not promising</span></span><span class="d">M2 − M2c: MODA −0.53, MOTA +0.21, IDF1 −0.06. The coverage prior has 11 fewer misses.</span></div>
+      <div class="verdict"><span class="h">H4</span><span class="t">VGF + rays add to scene augmentation <span class="pill serious"><i></i>Mixed</span></span><span class="d">M2c − A2f: MODA +0.74, but MOTA −0.84. VGF adds tracker false positives.</span></div>
+      <div class="verdict"><span class="h">H5</span><span class="t">The batch-order fix helps scene augmentation <span class="pill critical"><i></i>Reversed</span></span><span class="d">A2f − old-order A2: MOTA −1.89. A2f's MOTA is below all three old-order seeds, and the configs are identical.</span></div>
+      <div class="verdict"><span class="h">H6</span><span class="t">View mixing adds to M2c (new, post hoc) <span class="pill next"><i></i>Next run</span></span><span class="d">M2cx runs M2c with the old batch order on purpose. A2f at seed 2 checks H5 at a second seed.</span></div>
+    </div>
+  </section>
+
+  <section id="metrics">
+    <h2>Where each run lands</h2>
+    <p class="sub">Each dot is one training run. Attempt 1 trained three seeds of its baselines; the filled one is seed 80085, the same seed as the new runs. The dashed line is TrackTacular's published number.</p>
+    <div class="chart" id="strip-chart">
+      <div class="legend" aria-hidden="true">
+        <span><i class="sw" style="background:var(--s1)"></i>A2f</span>
+        <span><i class="sw" style="background:var(--s2)"></i>M2</span>
+        <span><i class="sw" style="background:var(--s3)"></i>M2c</span>
+        <span><i class="hollow"></i>attempt-1 seeds (filled = 80085)</span>
+        <span><i class="dia"></i>GRACE (published)</span>
+        <span><i class="ln"></i>TrackTacular (published)</span>
+      </div>
+      <div id="strip"></div>
+    </div>
+    <p class="caption">The old-order A2 sits right of A2f on every metric. All three of its MOTA seeds (91.49, 92.44, 92.65) are above A2f's 90.76, and the only code difference between them is the batch-order fix.</p>
+  </section>
+
+  <section id="errors">
+    <h2>Where the errors come from</h2>
+    <p class="sub">MOTA counts tracker misses, tracker false positives and ID switches. Detector counts come before tracking.</p>
+    <div class="chart" id="err-chart">
+      <div class="legend" aria-hidden="true">
+        <span><i class="sw" style="background:var(--s1)"></i>A2f</span>
+        <span><i class="sw" style="background:var(--s2)"></i>M2</span>
+        <span><i class="sw" style="background:var(--s3)"></i>M2c</span>
+      </div>
+      <div id="err"></div>
+    </div>
+    <p class="caption">Without VGF, the tracker's false positives equal the detector's (36 and 36). With VGF they rise: 34 to 45 for M2, and 40 to 49 for M2c. TrackTacular's tracker matches each detection's predicted previous position to existing tracks, so the likely cause is VGF degrading the offset head. This has not been verified.</p>
+  </section>
+
+  <section id="threshold">
+    <h2>Is 0.5 the right threshold?</h2>
+    <p class="sub">MODA over the detection threshold, computed on the test frames. This is an upper-bound check, not a reported number.</p>
+    <div class="chart" id="sweep-chart">
+      <div class="legend" aria-hidden="true">
+        <span><i class="sw" style="background:var(--s1)"></i>A2f</span>
+        <span><i class="sw" style="background:var(--s2)"></i>M2</span>
+        <span><i class="sw" style="background:var(--s3)"></i>M2c</span>
+        <span><i class="ln"></i>TrackTacular MODA 92.1</span>
+      </div>
+      <div id="sweep"></div>
+    </div>
+    <p class="caption">All three peak at 0.5, and M2c ties at 0.45. Threshold tuning has nothing left to give.</p>
+  </section>
+
+  <section id="next">
+    <h2>Next run, about 55 minutes on an A100</h2>
+    <div class="next">
+      <ul class="plain">
+        <li><b>M2cx, seed 80085:</b> M2c trained with view mixing (the old batch order, used on purpose). Compared with M2c, it tests whether the "bug" adds to VGF's detection gain.</li>
+        <li><b>A2f, seed 2:</b> checks at a second seed that the fix really hurt. It pairs with old-order A2 at seed 2 (MOTA 92.44).</li>
+      </ul>
+      <div class="codebox">
+        <button type="button" id="copy-btn">Copy</button>
+<pre id="colab-code">RUNS = 'M2cx:80085 A2f:2'
+!rm -rf /content/retrack &amp;&amp; git clone -q -b feat/research-methodology-2 https://github.com/rizwanmustafa/retrack.git /content/retrack
+try:
+    %run -i /content/retrack/research-methodology-2/M2_Colab.ipynb
+finally:
+    from google.colab import drive, runtime
+    drive.flush_and_unmount()
+    runtime.unassign()</pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="table">
+    <h2>All numbers</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Run</th><th>Seed</th><th>MODA</th><th>MODP</th><th>Prec.</th><th>Recall</th><th>MOTA</th><th>IDF1</th><th>Det. FN</th><th>Det. FP</th><th>Trk. miss</th><th>Trk. FP</th><th>ID sw.</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <span>Sources: TrackTacular, Teepe et al. CVPRW 2024 (Tab. 1–2, bilinear sampling); GRACE, Sakai et al. 2026 (Tab. 1, 7 cameras); attempt 1, for_claude.zip of 2026-11-08; this run, for_claude.zip of 2026-11-10, commit 73e1ed1.</span>
+    <span>All new runs use one seed. By the rule fixed before running, they are screening results, not confirmed.</span>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script>
+(function () {
+  const PAPER = { moda: 92.10, mota: 91.80, idf1: 95.30 };
+  const GRACE = { moda: 92.58, mota: 91.04, idf1: 94.53, modp: 80.33, prec: 96.42, rec: 96.15 };
+  const NEW = [
+    { key: 'a2f', name: 'A2f', long: 'A2f: scene aug, fixed order', color: '--s1',
+      moda: 91.49, modp: 75.67, prec: 96.18, rec: 95.27, mota: 90.76, idf1: 94.51, dfn: 45, dfp: 36, tmiss: 44, tfp: 36, ids: 8,
+      sweep: [[0.3,88.34],[0.35,89.60],[0.4,90.86],[0.45,91.07],[0.5,91.49],[0.55,90.13],[0.6,88.34],[0.65,84.45]] },
+    { key: 'm2', name: 'M2', long: 'M2: + VGF, diversity prior', color: '--s2',
+      moda: 91.70, modp: 77.22, prec: 96.39, rec: 95.27, mota: 90.13, idf1: 94.55, dfn: 45, dfp: 34, tmiss: 41, tfp: 45, ids: 8,
+      sweep: [[0.3,88.87],[0.35,89.81],[0.4,90.76],[0.45,91.18],[0.5,91.70],[0.55,91.07],[0.6,89.50],[0.65,85.50]] },
+    { key: 'm2c', name: 'M2c', long: 'M2c: + VGF, coverage prior', color: '--s3',
+      moda: 92.23, modp: 78.88, prec: 95.82, rec: 96.43, mota: 89.92, idf1: 94.61, dfn: 34, dfp: 40, tmiss: 42, tfp: 49, ids: 5,
+      sweep: [[0.3,89.50],[0.35,90.44],[0.4,91.49],[0.45,92.23],[0.5,92.23],[0.55,91.07],[0.6,89.60],[0.65,86.24]] },
+  ];
+  // attempt 1, cell thr0.5|tt, from code/baselines_attempt1.csv
+  const BASE = [
+    { key: 'e0', long: 'E0: retrained TrackTacular', seeds: [
+      { seed: 1, moda: 91.28, mota: 88.97, idf1: 92.52, dfn: 47, dfp: 36, ids: 9 },
+      { seed: 2, moda: 91.39, mota: 89.81, idf1: 94.27, dfn: 42, dfp: 40, ids: 10 },
+      { seed: 80085, moda: 90.76, mota: 89.08, idf1: 93.40, dfn: 47, dfp: 41, ids: 8 } ] },
+    { key: 'a2', long: 'A2: scene aug, old order', seeds: [
+      { seed: 1, moda: 91.60, mota: 91.49, idf1: 94.83, dfn: 55, dfp: 25, ids: 4 },
+      { seed: 2, moda: 92.02, mota: 92.44, idf1: 95.89, dfn: 53, dfp: 23, ids: 1 },
+      { seed: 80085, moda: 92.02, mota: 92.65, idf1: 95.42, dfn: 53, dfp: 23, ids: 6 } ] },
+  ];
+  const METRICS = [['moda', 'MODA'], ['mota', 'MOTA'], ['idf1', 'IDF1']];
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const fmt = d3.format('.2f');
+
+  function tooltip(chartEl) {
+    const tip = document.createElement('div');
+    tip.className = 'tip'; tip.hidden = true; chartEl.appendChild(tip);
+    return {
+      show(event, lines) {
+        tip.replaceChildren();
+        lines.forEach((l, i) => {
+          const row = document.createElement('div');
+          if (i === 0) { const b = document.createElement('b'); b.textContent = l; row.appendChild(b); } else row.textContent = l;
+          tip.appendChild(row);
+        });
+        tip.hidden = false;
+        const r = chartEl.getBoundingClientRect();
+        let x = event.clientX - r.left + 12, y = event.clientY - r.top + 12;
+        const w = tip.offsetWidth, h = tip.offsetHeight;
+        if (x + w > r.width - 4) x = event.clientX - r.left - w - 12;
+        if (y + h > r.height - 4) y = event.clientY - r.top - h - 12;
+        tip.style.left = Math.max(4, x) + 'px'; tip.style.top = Math.max(4, y) + 'px';
+      },
+      hide() { tip.hidden = true; }
+    };
+  }
+
+  // 1. Dot strips, one panel per metric
+  function drawStrip() {
+    const host = document.getElementById('strip'); host.replaceChildren();
+    const chartEl = document.getElementById('strip-chart');
+    const W = host.clientWidth;
+    const cols = W >= 760 ? 3 : 1;
+    const rows = [
+      { label: 'GRACE (paper)', kind: 'pub' },
+      { label: 'E0 baseline', kind: 'base', b: BASE[0] },
+      { label: 'A2, old order', kind: 'base', b: BASE[1] },
+      ...NEW.map(n => ({ label: n.long.split(':')[0], kind: 'new', n }))
+    ];
+    const labelW = cols === 3 ? 108 : 104, rowH = 30, top = 26, axisH = 28, gap = 22;
+    const panelW = cols === 3 ? (W - labelW - gap * 2) / 3 : W - labelW;
+    const panelH = top + rows.length * rowH + axisH;
+    const H = cols === 3 ? panelH : panelH * 3 + gap * 2;
+    const svg = d3.select(host).append('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img')
+      .attr('aria-label', 'MODA, MOTA and IDF1 per run, with the TrackTacular reference line');
+    const tip = tooltip(chartEl);
+    const surface = css('--surface');
+
+    METRICS.forEach(([m, M], i) => {
+      const col = cols === 3 ? i : 0, rowIdx = cols === 3 ? 0 : i;
+      const x0 = labelW + col * (panelW + gap), y0 = rowIdx * (panelH + gap);
+      const vals = [PAPER[m], GRACE[m], ...BASE.flatMap(b => b.seeds.map(s => s[m])), ...NEW.map(n => n[m])];
+      const lo = Math.floor((d3.min(vals) - 0.25) * 2) / 2, hi = Math.ceil((d3.max(vals) + 0.25) * 2) / 2;
+      const x = d3.scaleLinear().domain([lo, hi]).range([x0 + 6, x0 + panelW - 34]);
+      const g = svg.append('g');
+      g.append('text').attr('x', x0 + 6).attr('y', y0 + 14).attr('class', 'lbl')
+        .style('font-weight', 600).style('fill', css('--ink')).text(M);
+      const ticks = x.ticks(Math.max(3, Math.floor(panelW / 70)));
+      g.selectAll('line.gridline').data(ticks).join('line').attr('class', 'gridline')
+        .attr('x1', d => x(d)).attr('x2', d => x(d)).attr('y1', y0 + top - 4).attr('y2', y0 + top + rows.length * rowH);
+      g.selectAll('text.tick').data(ticks).join('text').attr('class', 'lbl tick').attr('text-anchor', 'middle')
+        .attr('x', d => x(d)).attr('y', y0 + top + rows.length * rowH + 18).text(d => d3.format('.1f')(d));
+      // paper reference
+      g.append('line').attr('x1', x(PAPER[m])).attr('x2', x(PAPER[m])).attr('y1', y0 + top - 8).attr('y2', y0 + top + rows.length * rowH)
+        .attr('stroke', css('--ref')).attr('stroke-width', 1.5).attr('stroke-dasharray', '4 3');
+      g.append('text').attr('class', 'lbl').attr('x', x(PAPER[m]) + 4).attr('y', y0 + top - 10).style('font-size', '11px')
+        .text(`TT ${fmt(PAPER[m])}`);
+
+      rows.forEach((r, j) => {
+        const cy = y0 + top + j * rowH + rowH / 2;
+        if (col === 0) {
+          svg.append('text').attr('class', 'lbl').attr('x', 0).attr('y', cy + 4)
+            .style('fill', r.kind === 'new' ? css('--ink') : css('--ink-2')).style('font-weight', r.kind === 'new' ? 600 : 400).text(r.label);
+        }
+        g.append('line').attr('x1', x0 + 6).attr('x2', x0 + panelW - 34).attr('y1', cy).attr('y2', cy).attr('stroke', css('--grid'));
+        const hit = (sel, lines) => sel.on('pointerenter pointermove', e => tip.show(e, lines)).on('pointerleave', () => tip.hide());
+        if (r.kind === 'pub') {
+          const s = 7, cx = x(GRACE[m]);
+          hit(g.append('path').attr('d', `M${cx},${cy - s}L${cx + s},${cy}L${cx},${cy + s}L${cx - s},${cy}Z`)
+            .attr('fill', css('--ink-2')).attr('stroke', surface).attr('stroke-width', 2), ['GRACE, 7 cameras (published)', `${M} ${fmt(GRACE[m])}`]);
+        } else if (r.kind === 'base') {
+          r.b.seeds.forEach(s => {
+            const paired = s.seed === 80085;
+            hit(g.append('circle').attr('class', 'dot').attr('cx', x(s[m])).attr('cy', cy).attr('r', paired ? 5.5 : 4.5)
+              .attr('fill', paired ? css('--ink-2') : surface).attr('stroke', paired ? surface : css('--ink-3'))
+              .attr('stroke-width', paired ? 2 : 1.5), [`${r.b.long} (attempt 1)`, `seed ${s.seed}${paired ? ', paired' : ''}`, `${M} ${fmt(s[m])}`]);
+          });
+          // invisible wider hit target per row is not needed: dots are >= 9px and spaced
+        } else {
+          const n = r.n, cx = x(n[m]);
+          hit(g.append('circle').attr('class', 'dot').attr('cx', cx).attr('cy', cy).attr('r', 6.5)
+            .attr('fill', css(n.color)).attr('stroke', surface).attr('stroke-width', 2),
+            [n.long, 'seed 80085', `${M} ${fmt(n[m])}`, `vs TrackTacular ${d3.format('+.2f')(n[m] - PAPER[m])}`]);
+          g.append('text').attr('class', 'lbl num').attr('x', cx + 10).attr('y', cy + 4).style('fill', css('--ink')).text(fmt(n[m]));
+        }
+      });
+    });
+  }
+
+  // 2. Error counts, grouped bars
+  function drawErrors() {
+    const host = document.getElementById('err'); host.replaceChildren();
+    const chartEl = document.getElementById('err-chart');
+    const W = host.clientWidth, narrow = W < 560;
+    const cats = [['dfn', narrow ? 'Det. misses' : 'Detector misses'], ['dfp', narrow ? 'Det. FP' : 'Detector false pos.'],
+                  ['tmiss', narrow ? 'Trk. misses' : 'Tracker misses'], ['tfp', narrow ? 'Trk. FP' : 'Tracker false pos.'], ['ids', 'ID switches']];
+    const m = { t: 18, r: 4, b: 40, l: 32 }, H = 280;
+    const svg = d3.select(host).append('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img')
+      .attr('aria-label', 'Error counts per run: detector and tracker misses, false positives, ID switches');
+    const x = d3.scaleBand().domain(cats.map(c => c[0])).range([m.l, W - m.r]).paddingInner(0.28).paddingOuter(0.1);
+    const xi = d3.scaleBand().domain(NEW.map(n => n.key)).range([0, x.bandwidth()]).paddingInner(0.08);
+    const y = d3.scaleLinear().domain([0, 55]).range([H - m.b, m.t]);
+    const tip = tooltip(chartEl);
+    y.ticks(5).forEach(t => {
+      svg.append('line').attr('class', 'gridline').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(t)).attr('y2', y(t));
+      svg.append('text').attr('class', 'lbl').attr('x', m.l - 6).attr('y', y(t) + 4).attr('text-anchor', 'end').text(t);
+    });
+    cats.forEach(([k, label]) => {
+      svg.append('text').attr('class', 'lbl').attr('x', x(k) + x.bandwidth() / 2).attr('y', H - m.b + 18).attr('text-anchor', 'middle').text(label);
+      NEW.forEach(n => {
+        const bx = x(k) + xi(n.key), bw = xi.bandwidth(), v = n[k], by = y(v), r = Math.min(4, bw / 2);
+        const path = `M${bx},${y(0)}V${by + r}Q${bx},${by} ${bx + r},${by}H${bx + bw - r}Q${bx + bw},${by} ${bx + bw},${by + r}V${y(0)}Z`;
+        svg.append('path').attr('d', path).attr('fill', css(n.color))
+          .on('pointerenter pointermove', e => tip.show(e, [n.long, `${label}: ${v}`, `≈ ${fmt(v * 100 / 952)} points of MOTA/MODA`]))
+          .on('pointerleave', () => tip.hide());
+        if (bw >= 16) svg.append('text').attr('class', 'lbl num').attr('x', bx + bw / 2).attr('y', by - 5)
+          .attr('text-anchor', 'middle').style('font-size', '11px').text(v);
+      });
+    });
+    svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', css('--ink-3'));
+  }
+
+  // 3. Threshold sweep
+  function drawSweep() {
+    const host = document.getElementById('sweep'); host.replaceChildren();
+    const chartEl = document.getElementById('sweep-chart');
+    const W = host.clientWidth, H = 300, m = { t: 16, r: 44, b: 36, l: 36 };
+    const svg = d3.select(host).append('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img')
+      .attr('aria-label', 'MODA against detection threshold for A2f, M2 and M2c');
+    const x = d3.scaleLinear().domain([0.3, 0.65]).range([m.l, W - m.r]);
+    const y = d3.scaleLinear().domain([84, 93]).range([H - m.b, m.t]);
+    const tip = tooltip(chartEl);
+    y.ticks(5).forEach(t => {
+      svg.append('line').attr('class', 'gridline').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(t)).attr('y2', y(t));
+      svg.append('text').attr('class', 'lbl').attr('x', m.l - 6).attr('y', y(t) + 4).attr('text-anchor', 'end').text(t);
+    });
+    NEW[0].sweep.map(d => d[0]).forEach(t => svg.append('text').attr('class', 'lbl').attr('x', x(t)).attr('y', H - m.b + 18)
+      .attr('text-anchor', 'middle').text(t.toFixed(2)));
+    svg.append('text').attr('class', 'lbl').attr('x', W - m.r).attr('y', H - 2).attr('text-anchor', 'end').text('detection threshold');
+    svg.append('line').attr('x1', x(0.5)).attr('x2', x(0.5)).attr('y1', m.t).attr('y2', H - m.b).attr('stroke', css('--rule')).attr('stroke-width', 6).attr('opacity', 0.7);
+    svg.append('text').attr('class', 'lbl').attr('x', x(0.5) + 6).attr('y', H - m.b - 8).style('font-size', '11px').text('protocol: 0.5');
+    svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(PAPER.moda)).attr('y2', y(PAPER.moda))
+      .attr('stroke', css('--ref')).attr('stroke-width', 1.5).attr('stroke-dasharray', '4 3');
+    svg.append('text').attr('class', 'lbl').attr('x', m.l + 4).attr('y', y(PAPER.moda) - 6).style('font-size', '11px').text('TrackTacular 92.1');
+    const line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
+    const surface = css('--surface');
+    NEW.forEach(n => {
+      svg.append('path').attr('d', line(n.sweep)).attr('fill', 'none').attr('stroke', css(n.color)).attr('stroke-width', 2);
+      const peak = n.sweep.find(d => d[0] === 0.5);
+      svg.append('circle').attr('cx', x(0.5)).attr('cy', y(peak[1])).attr('r', 4.5).attr('fill', css(n.color)).attr('stroke', surface).attr('stroke-width', 2);
+    });
+    // end labels, nudged apart
+    const ends = NEW.map(n => ({ n, y: y(n.sweep[n.sweep.length - 1][1]) })).sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 13) ends[i].y = ends[i - 1].y + 13;
+    ends.forEach(e => svg.append('text').attr('class', 'lbl').attr('x', W - m.r + 6).attr('y', e.y + 4)
+      .style('fill', css('--ink')).style('font-weight', 600).text(e.n.name));
+    // crosshair
+    const cross = svg.append('line').attr('y1', m.t).attr('y2', H - m.b).attr('stroke', css('--ink-3')).attr('stroke-width', 1).attr('visibility', 'hidden');
+    const ths = NEW[0].sweep.map(d => d[0]);
+    svg.append('rect').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b).attr('fill', 'transparent')
+      .on('pointerenter pointermove', e => {
+        const [px] = d3.pointer(e);
+        const t = ths.reduce((a, b) => Math.abs(x(b) - px) < Math.abs(x(a) - px) ? b : a);
+        cross.attr('x1', x(t)).attr('x2', x(t)).attr('visibility', 'visible');
+        tip.show(e, [`threshold ${t.toFixed(2)}`, ...NEW.map(n => `${n.name}  MODA ${fmt(n.sweep.find(d => d[0] === t)[1])}`)]);
+      })
+      .on('pointerleave', () => { cross.attr('visibility', 'hidden'); tip.hide(); });
+  }
+
+  function fillTable() {
+    const tb = document.getElementById('tbody');
+    const add = (cells, cls, color) => {
+      const tr = document.createElement('tr'); if (cls) tr.className = cls;
+      cells.forEach((c, i) => {
+        const td = document.createElement('td');
+        if (i === 0 && color) { const k = document.createElement('span'); k.className = 'key'; k.style.background = `var(${color})`; td.appendChild(k); }
+        td.appendChild(document.createTextNode(c === null ? '–' : (typeof c === 'number' && !Number.isInteger(c) ? fmt(c) : String(c))));
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    };
+    add(['TrackTacular (paper)', '–', 92.10, 76.20, 97.00, 95.10, 91.80, 95.30, null, null, null, null, null], 'ref');
+    add(['GRACE, 7 cameras (paper)', '–', 92.58, 80.33, 96.42, 96.15, 91.04, 94.53, null, null, null, null, null], 'ref');
+    BASE.forEach(b => b.seeds.forEach(s => add([b.long, s.seed, s.moda, null, null, null, s.mota, s.idf1, s.dfn, s.dfp, null, null, s.ids], 'ref')));
+    NEW.forEach(n => add([n.long, 80085, n.moda, n.modp, n.prec, n.rec, n.mota, n.idf1, n.dfn, n.dfp, n.tmiss, n.tfp, n.ids], '', n.color));
+  }
+
+  document.getElementById('copy-btn').addEventListener('click', (e) => {
+    const text = document.getElementById('colab-code').textContent, btn = e.currentTarget;
+    const done = (msg) => { btn.textContent = msg; setTimeout(() => { btn.textContent = 'Copy'; }, 1600); };
+    try {
+      navigator.clipboard.writeText(text).then(() => done('Copied'), () => selectCode());
+    } catch (err) { selectCode(); }
+    function selectCode() {
+      const r = document.createRange(); r.selectNodeContents(document.getElementById('colab-code'));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); done('Press Ctrl+C');
+    }
+  });
+
+  function drawAll() { drawStrip(); drawErrors(); drawSweep(); }
+  fillTable();
+  drawAll();
+  let last = 0;
+  new ResizeObserver(() => { const w = document.getElementById('strip').clientWidth; if (w !== last) { last = w; drawAll(); } })
+    .observe(document.querySelector('.wrap'));
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawAll);
+  new MutationObserver(drawAll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>

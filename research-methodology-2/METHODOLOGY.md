@@ -5,6 +5,10 @@ table/section** (index in [`PAPERS.md`](PAPERS.md)). Numbers from our own runs a
 results in `for_claude.zip`, 24 runs, 8 variants × 3 seeds. Numbers from reading this repository are cited as **[code]**
 with the file. Anything else is labelled **our choice**.*
 
+> **Status, 2026-11-10.** The VDGF method below was screened and did not beat TrackTacular (§8). The current method is
+> **methodology 3, SA-VM** (§9). It is built on the strongest result we have: scene augmentation with cross-sample view
+> mixing, which matches TrackTacular over 3 seeds. Sections 0–7 are kept as the record of methodology 2.
+
 ---
 
 ## 0. Summary
@@ -264,3 +268,86 @@ yet been checked against the literature for novelty.
 ## References
 
 See [`PAPERS.md`](PAPERS.md). Each PDF is in [`papers/`](papers/) (kept locally, not in git).
+
+
+## 9. Methodology 3: SA-VM, scene augmentation with cross-sample view mixing (amendment 2)
+
+### 9.1 Why we changed course
+
+- **The evidence.** Our strongest result is attempt-1 A2, over 3 seeds [A1]: MODA 91.88 ± 0.24, MOTA 92.19 ± 0.62,
+  IDF1 95.38 ± 0.53. This is level with TrackTacular's single run (92.1 / 91.8 / 95.3 [P01 Tab. 1–2]).
+  - Against our identically retrained TrackTacular (E0), it wins on every seed and every metric.
+  - Paired gains: +0.74 MODA (p = 0.12), +2.91 MOTA (p = 0.013), +1.98 IDF1 (p = 0.010).
+- **The mechanism.** §8 traced the extra gain over plain scene augmentation to the old camera-to-frame order. We call
+  this cross-sample view mixing.
+- **The decision.** Methodology 3 keeps the architecture fixed. It adds changes that can only cost little, because
+  they are training-only regularisers or inference-only options, and it adds the measurements a paper needs.
+
+### 9.2 Components
+
+| | component | where | origin | cost |
+|---|---|---|---|---|
+| C1 | **Scene augmentation**: mirror x / y / xy of the reference frame and labels, p = 0.5 | training | borrowed: MVAug [P15 §3] | none |
+| C2 | **Cross-sample view mixing, fixed** (`A2x`): with B = 2, cameras 1, 3, 5 are lifted in the partner sample's frame, Eq. (5) of the page | training | ours, found in [A1] | none |
+| C3 | **Random view mixing** (`RVM`): each camera independently takes the partner's frame with probability q = 3/7, the same expected count as C2 | training | ours | none |
+| C4 | **Mirror test-time augmentation** (`tta`): the center heatmap is averaged over the 4 mirrors of the reference frame. Offsets come from the identity pass | inference | standard flip TTA [our choice], applied through the reference frame | 4× inference (40 frames: seconds) |
+| C5 | **Robustness benchmark**: calibration noise and camera failures | evaluation | noise magnitudes from ATLASFusion [P03 Tab. 5] | evaluation only |
+| control | **Camera dropout** (`CD`): 67 % of samples lose 1–3 random cameras, matched to C2's rate | training | camera dropout as in Simple-BEV [P19] | none |
+
+Notes on the components:
+
+- **C4 is exact on this grid.** Voxel *i* is centred at `xmin + (i + ½)·size` [code: `utils/vox.py`
+  `get_mem_T_ref`], so the mirror about the grid centre maps cell *i* to cell X−1−*i*, and `torch.flip` undoes it
+  exactly.
+- **The models were trained on all four mirrors** (C1). TTA therefore averages views the model has learned, which is
+  why it is expected to help scene-augmented models and not E0.
+- **C5, calibration noise.** Per camera we draw Gaussian rotation noise (axis-angle, std 0.5° or 2.0° per axis) and
+  translation noise (std 0.05 m or 0.2 m per axis), applied in the camera frame.
+  - These are ATLASFusion's low and high magnitudes [P03 Tab. 5]. Their exact sampling is not specified, so our
+    numbers are comparable in scale only.
+  - There are 3 fixed draws per level, identical for every model, so models are compared on the same perturbations.
+- **C5, camera failures.** Each single camera off (7 conditions), and 7 cyclic camera pairs off.
+- **[code]:** C2/C3 are in `models/segnet.py` (`view_mix`, `view_mix_random`), C4/C5 in `evaluation/robust_eval.py`,
+  and the control uses the existing `cam_dropout_prob`.
+
+### 9.3 Hypotheses (fixed before the runs; same rule as §4)
+
+| | hypothesis | test |
+|---|---|---|
+| H5′ | View mixing, not scene augmentation alone, gives SA-VM's tracking gain | A2f vs attempt-1 A2 at seeds 2 and 1 (seed 80085 done: −1.89 MOTA) |
+| H7 | Random view mixing is at least as good as fixed view mixing | RVM vs A2x / attempt-1 A2, same seed |
+| H8 | Mirror TTA raises MODA for scene-augmented models (A2, A2f, RVM), and not for E0 | `tta` − `clean`, paired by checkpoint |
+| H9 | SA-VM degrades less than E0 under calibration noise | `calib_*` − `clean`, A2 vs E0, 3 seeds (existing checkpoints) |
+| H10 | SA-VM degrades less than E0 under camera failure | `drop*` − `clean`, A2 vs E0, 3 seeds (existing checkpoints) |
+| H11 | View mixing is not the same as camera dropout | CD vs A2x / RVM, same seed |
+
+**H9 and H10 need no training.** They run on the 6 attempt-1 checkpoints that already exist (E0 and A2, seeds 1, 2,
+80085), so they give a 3-seed result in the first session.
+
+### 9.4 Schedule
+
+| session | `RUNS` | answers | time on an A100 |
+|---|---|---|---|
+| 1 | `RVM:80085 A2f:2` | H7 (screening), H5′ (2nd seed), and H8–H10 on all checkpoints | ~5 min setup, ~2 min preflight, ~50 min training, ~10–15 min robustness |
+| 2 | `CD:80085 RVM:2` | H11, H7 (2nd seed) | ~55 min |
+| 3 | `RVM:1 A2f:1` | H7, H5′ (3rd seed) | ~55 min |
+
+Results accumulate in the same Drive folder, and every session's report covers all runs so far.
+
+### 9.5 What would count as a result
+
+- **Clean accuracy.** The paper claim is "on par with TrackTacular in clean accuracy, better than an identical
+  retrain". That is already supported for MOTA and IDF1, and needs 3 seeds of whichever of A2x / RVM is chosen.
+- **Robustness.** H9 or H10 would be the second, independent contribution. ATLASFusion reports TrackTacular falling
+  to 50.5 MODA under low calibration noise [P03 Tab. 5]. A model that degrades clearly less, paired over 3 seeds, is a
+  tangible result even if clean MODA only ties.
+- **TTA.** H8 is a cheap add-on. It is reported separately from the protocol numbers, because it changes inference.
+
+### 9.6 Threats
+
+- The robustness protocol is ours. Only its magnitudes come from [P03].
+- C3's q and the control's rate are matched by design, not tuned.
+- Attempt-1 checkpoints were trained at commit 06a0685. They load unchanged, because the flags of methodologies 2–3
+  default to off and add no parameters [code: `evaluation/retrack_eval.py` `load_model` asserts an exact state-dict
+  match].
+- Novelty of C2/C3 is checked only against [P01–P20]. A wider search is needed before submission.

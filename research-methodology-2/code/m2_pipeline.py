@@ -8,7 +8,9 @@ Steps (each one is skipped when its output already exists, so re-running continu
      about 3 minutes instead of after a 35-minute run)
   2. training: 30 epochs, same schedule as the attempt-1 baselines (configs/t_retrack.yml)
   3. evaluation: evaluation/arl_eval.py on the 40 test frames (cached detections + all post-hoc cells)
-  4. report: m2_report.py -> <results>/m2/REPORT.md, and <results>/m2/for_claude.zip (everything but checkpoints)
+  4. robustness (methodology 3): evaluation/robust_eval.py on every trained checkpoint and on attempt 1's base and A2
+     checkpoints (clean, mirror test-time augmentation, calibration noise, camera failures)
+  5. report: m2_report.py -> <results>/m2/REPORT.md, and <results>/m2/for_claude.zip (everything but checkpoints)
 
 Variants (see METHODOLOGY.md):
   M2   scene augmentation + VGF + ray conditioning + view-diversity gate prior   (the proposed method)
@@ -16,6 +18,9 @@ Variants (see METHODOLOGY.md):
   A2f  scene augmentation alone, with the batch-order fix                        (is VGF worth it?)
   VD   VGF + rays + view-diversity prior, no scene augmentation                  (is scene augmentation worth it?)
   M2cx M2c trained with view mixing (attempt 1's batch order, on purpose)        (does the "bug" add to VGF?)
+  A2x  SA-VM: scene augmentation + view mixing of cameras 1, 3, 5 (= attempt-1 A2, on purpose)
+  RVM  scene augmentation + random view mixing (each camera with probability 3/7)  (methodology 3)
+  CD   scene augmentation + camera dropout instead of view mixing                 (control: is mixing just dropout?)
 """
 import argparse
 import glob
@@ -31,13 +36,19 @@ import zipfile
 HERE = osp.dirname(osp.abspath(__file__))
 WORLDTRACK = osp.normpath(osp.join(HERE, '..', '..', 'WorldTrack'))
 
+_V = dict(scene=True, vgf=False, ray=False, prior='diversity', mix=False, mixr=0.0, cdrop=0.0)
 VARIANTS = {
-    'M2': dict(scene=True, vgf=True, ray=True, prior='diversity', mix=False),
-    'M2c': dict(scene=True, vgf=True, ray=True, prior='coverage', mix=False),
-    'A2f': dict(scene=True, vgf=False, ray=False, prior='diversity', mix=False),
-    'VD': dict(scene=False, vgf=True, ray=True, prior='diversity', mix=False),
-    'M2cx': dict(scene=True, vgf=True, ray=True, prior='coverage', mix=True),
+    'M2': dict(_V, vgf=True, ray=True),
+    'M2c': dict(_V, vgf=True, ray=True, prior='coverage'),
+    'A2f': dict(_V),
+    'VD': dict(_V, scene=False, vgf=True, ray=True),
+    'M2cx': dict(_V, vgf=True, ray=True, prior='coverage', mix=True),
+    'A2x': dict(_V, mix=True),
+    'RVM': dict(_V, mixr=round(3 / 7, 4)),
+    # dropout matched to view mixing: 2/3 of the samples lose 1-3 cameras, as 2/3 of the batches misplace 3 cameras
+    'CD': dict(_V, cdrop=0.67),
 }
+ATTEMPT1 = {'base': 'E0', 'A2': 'A2'}  # attempt-1 runs evaluated for robustness: folder variant -> report variant
 
 
 def log(msg):
@@ -54,6 +65,9 @@ def train_cmd(variant, seed, run_dir, data_dir, args, epochs, extra=()):
             '--model.ray_cond', str(v['ray']).lower(),
             '--model.vgf_prior', v['prior'],
             '--model.view_mix', str(v['mix']).lower(),
+            '--model.view_mix_random', str(v['mixr']),
+            '--model.cam_dropout_prob', str(v['cdrop']),
+            '--model.cam_dropout_max', '3',
             '--data.init_args.data_dir', data_dir,
             '--data.init_args.split', 'standard',
             '--data.init_args.occlusion_prob', '0.0',
@@ -113,8 +127,30 @@ def preflight(variants, root, data_dir, args):
         v = VARIANTS[variant]
         run([sys.executable, '-c', PREFLIGHT_CHECK, last_ckpt(osp.join(out, 'run')), data_dir,
              str(v['vgf']).lower(), str(v['ray']).lower(), v['prior']])
+        if not args.skip_robust and not osp.exists(osp.join(root, 'preflight', 'robust_quick')):
+            spec = osp.join(out, 'robust_spec.json')
+            json.dump([dict(tag=f'preflight_{variant}', variant=variant, seed=0,
+                            ckpt=last_ckpt(osp.join(out, 'run')))], open(spec, 'w'))
+            run([sys.executable, '-m', 'evaluation.robust_eval', '--spec', spec, '--data_dir', data_dir,
+                 '--out_dir', osp.join(root, 'preflight', 'robust_quick'), '--quick'])
         open(osp.join(out, 'PASSED'), 'w').close()
     log('Preflight passed')
+
+
+def robust_jobs(root, ckpts, attempt1):
+    """Every checkpoint trained in <root>/runs (this session or earlier) plus attempt 1's base and A2."""
+    jobs = {}
+    for done in glob.glob(osp.join(root, 'runs', '*', 'DONE.json')):
+        d = json.load(open(done))
+        jobs[f"{d['variant']}_s{d['seed']}"] = dict(variant=d['variant'], seed=d['seed'], ckpt=d['ckpt'])
+    for (variant, seed), ckpt in ckpts.items():
+        jobs[f'{variant}_s{seed}'] = dict(variant=variant, seed=seed, ckpt=ckpt)
+    for folder, variant in ATTEMPT1.items():
+        for ckpt in glob.glob(osp.join(attempt1, 'runs', f'{folder}_standard_s*', 'lightning_logs', '*',
+                                       'checkpoints', 'last.ckpt')):
+            seed = int(ckpt.split(f'{folder}_standard_s')[1].split(os.sep)[0])
+            jobs[f'attempt1_{variant}_s{seed}'] = dict(variant=f'attempt1_{variant}', seed=seed, ckpt=ckpt)
+    return [dict(tag=t, **j) for t, j in sorted(jobs.items()) if j['ckpt'] and osp.exists(j['ckpt'])]
 
 
 def train_all(jobs, root, data_dir, args):
@@ -187,6 +223,9 @@ def main():
     p.add_argument('--precision', default='32-true', help='as the attempt-1 baselines')
     p.add_argument('--train_args', default='', help='extra arguments for `world_track.py fit`')
     p.add_argument('--skip_preflight', action='store_true')
+    p.add_argument('--skip_robust', action='store_true', help='skip the methodology-3 robustness evaluation')
+    p.add_argument('--attempt1', default='/content/drive/MyDrive/retrack_results_8nov/arl_full',
+                   help="attempt 1's results folder; its base and A2 checkpoints get the robustness evaluation")
     args = p.parse_args()
 
     jobs = []
@@ -211,6 +250,14 @@ def main():
         if not osp.exists(osp.join(out, 'metrics.csv')):
             log(f'Evaluating {tag}')
             run(eval_cmd(ckpt, out, tag, variant, seed, data_dir))
+    if not args.skip_robust:
+        jobs = robust_jobs(root, ckpts, args.attempt1)
+        log(f'Robustness evaluation of {len(jobs)} checkpoint(s) '
+            f'({sum(j["variant"].startswith("attempt1") for j in jobs)} from attempt 1, {args.attempt1})')
+        spec = osp.join(root, 'robust_spec.json')
+        json.dump(jobs, open(spec, 'w'), indent=1)
+        run([sys.executable, '-m', 'evaluation.robust_eval', '--spec', spec, '--data_dir', data_dir,
+             '--out_dir', osp.join(root, 'robust')])
     subprocess.run([sys.executable, osp.join(HERE, 'm2_report.py'), '--results', root], check=True)
     bundle(root)
 

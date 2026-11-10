@@ -1,0 +1,507 @@
+<title>SA-VM Methodology</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with two views (walkthrough, paper); Figure 1 breaks out to full container width */
+:root {
+  --bg: #f5f6f7;
+  --paper: #fdfdfc;
+  --ink: #12161b;
+  --ink-2: #4b535d;
+  --ink-3: #78808a;
+  --rule: #dce0e5;
+  --soft: #eceff2;
+  --base-fill: #eef1f4;
+  --aug: #2a78d6;
+  --aug-fill: #e6f0fb;
+  --mix: #d4571f;
+  --mix-fill: #fcebe2;
+  --good: #0ca30c;
+  --font-display: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111315; --paper: #191b1d; --ink: #edf0f2; --ink-2: #b8bfc7; --ink-3: #8a929b; --rule: #2d3237; --soft: #22262a;
+    --base-fill: #23272b; --aug: #5b9ff0; --aug-fill: #16263a; --mix: #ef7a45; --mix-fill: #35201a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111315; --paper: #191b1d; --ink: #edf0f2; --ink-2: #b8bfc7; --ink-3: #8a929b; --rule: #2d3237; --soft: #22262a;
+  --base-fill: #23272b; --aug: #5b9ff0; --aug-fill: #16263a; --mix: #ef7a45; --mix-fill: #35201a;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15.5px; line-height: 1.6; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 72px; display: grid; gap: 28px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(30px, 4.4vw, 44px); line-height: 1.1; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.3; margin: 0; }
+p { margin: 0; }
+.lede { font-size: 17.5px; color: var(--ink-2); max-width: 70ch; }
+.mono { font-family: var(--font-mono); font-size: 0.9em; }
+.num { font-variant-numeric: tabular-nums; }
+
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--rule); }
+.tab { font: inherit; font-weight: 500; font-size: 14.5px; color: var(--ink-2); background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; margin-bottom: -1px; cursor: pointer; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.tab:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--aug); outline-offset: 2px; }
+
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.stat { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: grid; gap: 2px; }
+.stat .k { font-size: 12.5px; color: var(--ink-3); letter-spacing: 0.03em; text-transform: uppercase; }
+.stat .v { font-family: var(--font-display); font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.stat .v small { font-size: 16px; color: var(--ink-2); font-weight: 500; }
+.stat .d { font-size: 13.5px; color: var(--ink-2); }
+
+.figure { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 14px; display: grid; gap: 10px; min-width: 0; }
+.figscroll { overflow-x: auto; }
+.figscroll svg { display: block; width: 100%; min-width: 820px; height: auto; }
+.figcap { font-size: 14px; color: var(--ink-2); max-width: 90ch; }
+.figcap b { color: var(--ink); }
+
+.steps { display: grid; gap: 26px; counter-reset: step; }
+.step { display: grid; grid-template-columns: 44px 1fr; gap: 4px 16px; min-width: 0; }
+.step .n { font-family: var(--font-display); font-size: 26px; font-weight: 600; color: var(--ink-3); line-height: 1.2; font-variant-numeric: tabular-nums; }
+.step .body { display: grid; gap: 8px; min-width: 0; max-width: 72ch; }
+.step.ours .n { color: var(--mix); }
+.step.borrowed .n { color: var(--aug); }
+.tag { display: inline-block; font-family: var(--font-body); font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 7px; border-radius: 4px; margin-left: 8px; vertical-align: 3px; }
+.tag.base { background: var(--soft); color: var(--ink-2); }
+.tag.aug { background: var(--aug-fill); color: var(--aug); }
+.tag.mix { background: var(--mix-fill); color: var(--mix); }
+.term { font-weight: 600; }
+.note { border-left: 3px solid var(--rule); padding: 4px 0 4px 12px; color: var(--ink-2); font-size: 14.5px; }
+ul.tight { margin: 0; padding-left: 20px; display: grid; gap: 3px; }
+
+.toy { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 14px; display: grid; gap: 12px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font-size: 14px; }
+.controls label { display: inline-flex; gap: 8px; align-items: center; color: var(--ink-2); }
+select { font: inherit; font-size: 14px; color: var(--ink); background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 3px 6px; }
+.toy svg { display: block; width: 100%; height: auto; }
+.toyread { font-size: 14px; color: var(--ink-2); }
+.toyread b { color: var(--ink); }
+.toylegend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
+.toylegend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); display: inline-block; }
+.sw-ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--aug); display: inline-block; box-sizing: border-box; }
+.sw-ring.m { border-color: var(--mix); }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+caption { caption-side: top; text-align: left; padding: 10px 12px 4px; font-size: 13.5px; color: var(--ink-2); }
+th, td { padding: 7px 12px; text-align: right; border-bottom: 1px solid var(--soft); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-weight: 600; font-size: 12.5px; color: var(--ink-2); border-bottom: 1px solid var(--rule); }
+tbody tr:last-child td { border-bottom: 0; }
+tr.hl td { font-weight: 600; }
+td.up { color: var(--good); }
+
+/* paper view */
+.paper { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding-block: 36px 44px; padding-inline: clamp(18px, 5vw, 64px); display: grid; gap: 18px; font-family: var(--font-display); font-size: 18px; line-height: 1.62; min-width: 0; }
+.paper > * { max-width: 74ch; }
+.paper > .figure, .paper > .tablewrap, .paper > .algo { max-width: none; }
+.paper h2 { font-size: 24px; margin-top: 8px; }
+.paper h3 { font-size: 19px; margin-top: 4px; }
+.paper .runin { font-weight: 600; }
+.paper .figure { font-family: var(--font-body); }
+.paper .tablewrap { font-family: var(--font-body); }
+.eq { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 6px 0 6px 4%; font-family: var(--font-display); font-size: 19px; overflow-x: auto; }
+.eq .m { font-style: italic; white-space: nowrap; }
+.eq .m .r { font-style: normal; }
+.eq .no { font-style: normal; color: var(--ink-2); font-size: 16px; font-family: var(--font-body); }
+var { font-style: italic; }
+.algo { border-top: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink); padding: 8px 4px 10px; font-family: var(--font-body); font-size: 14.5px; display: grid; gap: 2px; overflow-x: auto; }
+.algo .ttl { border-bottom: 1px solid var(--ink); padding-bottom: 4px; margin-bottom: 4px; font-weight: 600; }
+.algo ol { margin: 0; padding-left: 26px; display: grid; gap: 2px; }
+.algo .in { padding-left: 22px; }
+.algo .c { color: var(--ink-3); }
+.refs { font-family: var(--font-body); font-size: 14px; color: var(--ink-2); display: grid; gap: 4px; padding-left: 0; list-style: none; margin: 0; }
+footer { color: var(--ink-3); font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Multi-view pedestrian detection and tracking · WILDTRACK · research methodology</div>
+    <h1>SA-VM: scene augmentation with cross-sample view mixing</h1>
+    <p class="lede">This is our strongest method so far: TrackTacular trained with scene flips, plus a training-time effect where three of the seven cameras are placed using the other sample's flip. Over three seeds it matches TrackTacular's published numbers and clearly beats our own retrained TrackTacular.</p>
+  </header>
+
+  <div class="summary" aria-label="Headline results, mean over three seeds">
+    <div class="stat"><span class="k">MODA, 3 seeds</span><span class="v num">91.88 <small>± 0.24</small></span><span class="d">Paper 92.1. Our retrained TrackTacular 91.14 ± 0.34.</span></div>
+    <div class="stat"><span class="k">MOTA, 3 seeds</span><span class="v num">92.19 <small>± 0.62</small></span><span class="d">Paper 91.8. Retrained 89.29 ± 0.46. Paired gain +2.91, p = 0.013.</span></div>
+    <div class="stat"><span class="k">IDF1, 3 seeds</span><span class="v num">95.38 <small>± 0.53</small></span><span class="d">Paper 95.3. Retrained 93.40 ± 0.88. Paired gain +1.98, p = 0.010.</span></div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" role="tab" id="tab-learn" aria-controls="learn" aria-selected="true" type="button">Walkthrough for newcomers</button>
+    <button class="tab" role="tab" id="tab-paper" aria-controls="paper" aria-selected="false" type="button">Paper version (Method)</button>
+  </div>
+
+  <!-- ===================================================== WALKTHROUGH -->
+  <section id="learn" role="tabpanel" aria-labelledby="tab-learn" style="display:grid;gap:28px">
+    <div class="figure">
+      <div class="figscroll" id="fig-learn"></div>
+      <p class="figcap"><b>Figure 1.</b> The whole pipeline, left to right. Grey boxes are the unchanged TrackTacular baseline. Blue is scene augmentation, borrowed from MVAug. Orange is the view-mixing effect we found. Dashed boxes run only during training.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step"><span class="n">1</span><div class="body">
+        <h3>The task <span class="tag base">setup</span></h3>
+        <p>Seven fixed, calibrated cameras film a 12 × 36 m public square. Each frame has about 20 people, and a point on the ground is seen by 3.74 cameras on average. We want two things: a dot on the ground for every person (<span class="term">detection</span>), and the same ID for each person from frame to frame (<span class="term">tracking</span>).</p>
+        <p>The ground truth is a top-down grid of 480 × 1440 cells, each 2.5 cm wide. Video runs at 2 frames per second. We train on frames 0–359 and test on frames 360–399, which hold 952 labelled people in total.</p>
+      </div></div>
+
+      <div class="step"><span class="n">2</span><div class="body">
+        <h3>Why a map seen from above <span class="tag base">idea</span></h3>
+        <p>A person hidden behind someone in one camera is usually visible in another. If we move every camera's information onto one shared top-down map, the <span class="term">bird's-eye view (BEV)</span>, the cameras can vote together on where people stand. This is the core idea behind TrackTacular and the methods it builds on.</p>
+      </div></div>
+
+      <div class="step"><span class="n">3</span><div class="body">
+        <h3>Turn each image into features <span class="tag base">baseline</span></h3>
+        <p>Each 720 × 1280 image goes through <span class="term">ResNet-18</span>, a standard image network pre-trained on ImageNet. It outputs a <span class="term">feature map</span>: 128 numbers per location on a grid 8 times smaller than the image (90 × 160). Each location's numbers describe what is there, such as "a leg" or "a head" or "pavement". All seven cameras share the same network.</p>
+      </div></div>
+
+      <div class="step"><span class="n">4</span><div class="body">
+        <h3>Lift the features onto the map <span class="tag base">baseline</span></h3>
+        <p>We cover the square with a 3D grid of small boxes, called <span class="term">voxels</span>: 360 × 120 × 4 of them, each 10 cm × 10 cm × 50 cm, up to 2 m high. For every voxel and every camera, the calibration tells us which pixel that voxel lands on. We copy the feature found there into the voxel, blending the four nearest feature locations. This is called <span class="term">bilinear sampling</span>, and it comes from Simple-BEV. Voxels a camera cannot see stay empty for that camera.</p>
+        <p class="note">The key point for later: where a camera's evidence lands on the map depends only on the geometry, meaning the calibration and the map transform. Change the map transform, and that camera's evidence moves.</p>
+      </div></div>
+
+      <div class="step"><span class="n">5</span><div class="body">
+        <h3>Fuse the seven cameras <span class="tag base">baseline</span></h3>
+        <p>For each voxel, the seven cameras' features are stacked side by side, always in the same camera order, then mixed by a small 3D convolution. Because the order is fixed, the network can learn how much to trust each camera. The four height levels are then folded into one, giving a 120 × 360 top-down feature map.</p>
+      </div></div>
+
+      <div class="step"><span class="n">6</span><div class="body">
+        <h3>Predict people, and where they just were <span class="tag base">baseline</span></h3>
+        <p>Small output layers called <span class="term">heads</span> read the map and predict three things:</p>
+        <ul class="tight">
+          <li>a <span class="term">center heatmap</span>, high where a person stands;</li>
+          <li>a <span class="term">sub-cell offset</span>, the exact position inside the 10 cm cell;</li>
+          <li>a <span class="term">tracking offset</span>, where this person was one frame earlier.</li>
+        </ul>
+        <p>Training compares these predictions to the labels using standard losses: a focal loss for the heatmap and L1-type losses for the offsets.</p>
+      </div></div>
+
+      <div class="step"><span class="n">7</span><div class="body">
+        <h3>From heatmap to tracks <span class="tag base">baseline</span></h3>
+        <p>Every heatmap peak above 0.5 is a detection. The tracker then takes each detection's predicted previous position and matches it to the nearest existing track, so the person keeps their ID. Unmatched detections start new tracks.</p>
+      </div></div>
+
+      <div class="step borrowed"><span class="n">8</span><div class="body">
+        <h3>Flip the whole scene during training <span class="tag aug">borrowed: MVAug</span></h3>
+        <p>We only have 360 training frames, so the network sees the same crowd layouts again and again. <span class="term">Scene augmentation</span> creates new layouts. With probability 0.5, we mirror the map left–right, top–bottom, or both. For example, a person at x = 300 on the 1440-wide grid moves to x = 1140.</p>
+        <p>We do not flip the images. We change the map transform instead, so every camera's evidence lands in the mirrored position, and we move the labels the same way. Images, evidence and labels stay consistent with each other. MVAug introduced this and showed it reduces overfitting.</p>
+      </div></div>
+
+      <div class="step ours"><span class="n">9</span><div class="body">
+        <h3>View mixing: three cameras get the other sample's flip <span class="tag mix">ours, found by accident</span></h3>
+        <p>Training uses batches of two frames. In the code we trained with, the map transform was copied to the cameras in the wrong order. As a result, cameras 2, 4 and 6 of each frame were placed using the other frame's flip. (The code counts cameras from 0, so these are cameras 1, 3 and 5 there.) The labels stayed correct.</p>
+        <p>When both frames have the same flip, nothing changes. That happens 1/3 of the time. The other 2/3 of the time, those three cameras put their evidence at mirrored positions, while the other four cameras agree with the labels. To find people, the network has to trust the cameras that agree and ignore the ones that conflict. That is similar to training with badly calibrated cameras. At test time every camera is placed correctly.</p>
+        <p>We later fixed the order (A2f). Same settings and same seed, and tracking got worse: MOTA fell from 92.65 to 90.76. So the "bug" was helping. We now keep it as a deliberate training option (<span class="mono">--model.view_mix</span>).</p>
+      </div></div>
+    </div>
+
+    <div class="toy" id="toy">
+      <h3>Try it: where does each camera's evidence land?</h3>
+      <div class="controls">
+        <label for="flip-self">This frame's flip <select id="flip-self"><option value="none">none</option><option value="lr" selected>left–right</option><option value="tb">top–bottom</option><option value="both">both</option></select></label>
+        <label for="flip-partner">Other frame's flip <select id="flip-partner"><option value="none" selected>none</option><option value="lr">left–right</option><option value="tb">top–bottom</option><option value="both">both</option></select></label>
+        <label for="mix-on"><input type="checkbox" id="mix-on" checked> View mixing</label>
+      </div>
+      <div class="toylegend" aria-hidden="true">
+        <span><i class="sw-dot"></i>label (where the person is on the flipped map)</span>
+        <span><i class="sw-ring"></i>evidence from cameras 1, 3, 5, 7</span>
+        <span><i class="sw-ring m"></i>evidence from cameras 2, 4, 6</span>
+      </div>
+      <div id="toy-svg"></div>
+      <p class="toyread" id="toy-read" aria-live="polite"></p>
+      <p class="toyread">The map is the 36 × 12 m square seen from above. The people positions are made-up examples.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step"><span class="n">10</span><div class="body">
+        <h3>How we score it</h3>
+        <p>A detection counts as correct if it is within 0.5 m of a labelled person.</p>
+        <ul class="tight">
+          <li><span class="term">MODA</span> = 1 − (missed people + false detections) / 952. One error costs about 0.105 points.</li>
+          <li><span class="term">MOTA</span> is the same but on the tracker's output, and it also counts ID switches.</li>
+          <li><span class="term">IDF1</span> measures how consistently each person keeps one ID.</li>
+        </ul>
+        <p>We follow the paper's protocol exactly: threshold 0.5, TrackTacular's tracker, last training epoch, nothing tuned on the test frames.</p>
+      </div></div>
+
+      <div class="step"><span class="n">11</span><div class="body">
+        <h3>What we found</h3>
+        <p>We trained each model three times with different random seeds (1, 2, 80085), because results move by 0.3–1.5 points from seed to seed. Against our own retrained TrackTacular, SA-VM wins on every seed and every metric. Against the paper's single run it is level: none of the differences is statistically meaningful. The tables are in the paper version.</p>
+      </div></div>
+
+      <div class="step"><span class="n">12</span><div class="body">
+        <h3>What is not proven yet</h3>
+        <ul class="tight">
+          <li>The credit for view mixing rests on one seed (A2f at 80085). A2f at seed 2 is queued to confirm it.</li>
+          <li>Mixing always hits the same three cameras. A random choice of cameras may work better, or worse.</li>
+          <li>We have not searched the literature beyond our 20 downloaded papers, so novelty is not established. None of the 20 trains with deliberately misplaced views. MVAug's view augmentation keeps the views aligned.</li>
+          <li>If mixing works like calibration noise, the model should be more robust to bad calibration at test time. TrackTacular collapses there (ATLASFusion, Tab. 5). We have not tested this yet.</li>
+        </ul>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ===================================================== PAPER VERSION -->
+  <section id="paper" role="tabpanel" aria-labelledby="tab-paper" hidden>
+    <article class="paper">
+      <h2>3&nbsp;&nbsp;Method</h2>
+      <p>We build on TrackTacular [1] with bilinear-sampling lifting [5]. We change only the training procedure. Section 3.1 states the problem, §3.2 summarises the baseline, §3.3 describes scene augmentation [3], and §3.4 introduces cross-sample view mixing. Figure 1 shows the full pipeline.</p>
+
+      <div class="figure">
+        <div class="figscroll" id="fig-paper"></div>
+        <p class="figcap"><b>Figure 1.</b> Overview of SA-VM. Image features from a shared encoder Φ are lifted into a voxel grid with per-camera projections, fused across cameras, and decoded into a center heatmap, sub-cell offsets and tracking offsets. During training, the reference frame of each sample is transformed by a random scene augmentation <i>A</i><sup><i>b</i></sup> (blue), applied jointly to the geometry and the labels. Cross-sample view mixing (orange) lifts a subset of cameras with the partner sample's reference frame. Dashed: training only.</p>
+      </div>
+
+      <h3>3.1&nbsp;&nbsp;Problem formulation</h3>
+      <p>A scene is observed by <var>V</var> = 7 static cameras with intrinsics <var>K<sub>v</sub></var> and extrinsics <var>T<sub>v</sub></var> = [<var>R<sub>v</sub></var> | <var>t<sub>v</sub></var>]. A fixed similarity <var>G</var> maps world coordinates to the reference (grid) frame of the ground plane, discretised into <var>X</var> × <var>Y</var> = 360 × 120 cells of 10 cm, with <var>Z</var> = 4 height bins up to 2 m. Given synchronised images <var>I</var><sub>1:<var>V</var></sub> at time <var>t</var>, the model predicts pedestrian ground positions and their displacement to <var>t</var> − 1. A tracker links these into identities.</p>
+
+      <h3>3.2&nbsp;&nbsp;Baseline</h3>
+      <p><span class="runin">Lifting.</span> A shared ResNet-18 encoder Φ produces features Φ(<var>I<sub>v</sub></var>) ∈ ℝ<sup>128 × <var>H</var>/8 × <var>W</var>/8</sup>. For a voxel centre <b><var>x</var></b> in the reference frame, camera <var>v</var> contributes</p>
+      <div class="eq"><span class="m">f<sub>v</sub>(<b>x</b>) = Φ(I<sub>v</sub>)⟨ π( K̃<sub>v</sub> T<sub>v</sub> G<sup>−1</sup> <b>x</b> ) ⟩</span><span class="no">(1)</span></div>
+      <p>Here π is the perspective division, <var>K̃<sub>v</sub></var> is the intrinsic matrix scaled to the feature resolution, and ⟨·⟩ is bilinear interpolation. Voxels outside the image get zero and a validity mask <var>m<sub>v</sub></var>(<b><var>x</var></b>) = 0.</p>
+      <p><span class="runin">Fusion and decoding.</span> Camera features are concatenated in a fixed camera order and fused by a 3D convolution ψ. Height is folded into channels, and a 2D compressor ρ gives the BEV feature map</p>
+      <div class="eq"><span class="m">B = ρ( fold<sub>Z</sub>( ψ([ f<sub>1</sub> ; … ; f<sub>V</sub> ]) ) ) ∈ <span class="r">ℝ</span><sup>C × Y × X</sup></span><span class="no">(2)</span></div>
+      <p>A decoder predicts a center heatmap <var>Ĥ</var>, a sub-cell offset <var>Ô</var> and a tracking offset <var>Δ̂</var> to the person's position at <var>t</var> − 1. An auxiliary head predicts image-plane foot heatmaps. The training loss is the uncertainty-weighted sum [1] of a focal loss on <var>Ĥ</var>, L1 losses on <var>Ô</var>, a smooth-L1 loss on <var>Δ̂</var> and a focal loss on the image heatmaps.</p>
+      <p><span class="runin">Inference.</span> Detections are local maxima of <var>Ĥ</var> above τ = 0.5. The tracker associates each detection with existing tracks by the distance between the track position and the detection shifted by <var>Δ̂</var>.</p>
+
+      <h3>3.3&nbsp;&nbsp;Scene augmentation</h3>
+      <p>Following MVAug [3], we augment the reference frame rather than the images. For training sample <var>b</var> we draw</p>
+      <div class="eq"><span class="m">G<sup>b</sup> = A<sup>b</sup> J<sup>b</sup> G,&nbsp;&nbsp; A<sup>b</sup> ∈ { <span class="r">I</span>, C S<sub>x</sub> C<sup>−1</sup>, C S<sub>y</sub> C<sup>−1</sup>, C S<sub>xy</sub> C<sup>−1</sup> }</span><span class="no">(3)</span></div>
+      <p>Here <var>S</var><sub>·</sub> are the axis mirrors diag(−1, 1), diag(1, −1) and diag(−1, −1). <var>C</var> translates to the grid centre (720, 240), so the grid maps onto itself. <var>J<sup>b</sup></var> is a translation jitter drawn uniformly from ±0.25 grid units, as in the baseline. <var>A<sup>b</sup></var> = <span class="r">I</span> with probability 0.5, and otherwise one of the three mirrors uniformly. The same transform is applied to the labels of frames <var>t</var> and <var>t</var> − 1:</p>
+      <div class="eq"><span class="m">y<sup>b</sup> = A<sup>b</sup> J<sup>b</sup> y,&nbsp;&nbsp; y<sup>b</sup><sub>t−1</sub> = A<sup>b</sup> J<sup>b</sup> y<sub>t−1</sub></span><span class="no">(4)</span></div>
+      <p>Images and image-plane labels are unchanged. Because Eq. (1) uses <var>G<sup>b</sup></var> in place of <var>G</var> for every camera, the lifted evidence of all views moves with the labels. This scene-consistent geometry is what MVAug's scene augmentation preserves [3, §3].</p>
+
+      <h3>3.4&nbsp;&nbsp;Cross-sample view mixing</h3>
+      <p>Let a training batch hold <var>B</var> samples with reference frames <var>G</var><sup>0:<var>B</var>−1</sup>. View mixing lifts camera <var>v</var> of sample <var>b</var> with the frame of sample <var>μ</var>(<var>b</var>, <var>v</var>):</p>
+      <div class="eq"><span class="m">f<sup>b</sup><sub>v</sub>(<b>x</b>) = Φ(I<sup>b</sup><sub>v</sub>)⟨ π( K̃<sub>v</sub> T<sub>v</sub> (G<sup>μ(b,v)</sup>)<sup>−1</sup> <b>x</b> ) ⟩,&nbsp;&nbsp; μ(b, v) = (bV + v) mod B</span><span class="no">(5)</span></div>
+      <p>The labels remain <var>y<sup>b</sup></var>. With <var>B</var> = 2 and odd <var>V</var>, μ(<var>b</var>, <var>v</var>) = (<var>b</var> + <var>v</var>) mod 2. The cameras with odd index (1, 3, 5) take the partner's frame, and the cameras with even index (0, 2, 4, 6) keep their own. A mixed camera is therefore misregistered by</p>
+      <div class="eq"><span class="m">E = G<sup>μ</sup> (G<sup>b</sup>)<sup>−1</sup> = A<sup>μ</sup> J<sup>μ</sup> (A<sup>b</sup> J<sup>b</sup>)<sup>−1</sup></span><span class="no">(6)</span></div>
+      <p><var>E</var> is the identity up to sub-centimetre jitter when both samples drew the same mirror. That happens with probability 0.5² + 0.5²/3 = 1/3. Otherwise <var>E</var> is a mirror or a 180° rotation about the grid centre. In two thirds of the batches, three of the seven views therefore carry evidence that conflicts with the labels, while four agree. Because fusion (Eq. 2) is camera-ordered, the network can learn to rely on cross-view agreement and to discount views that disagree. At inference μ(<var>b</var>, <var>v</var>) = <var>b</var>, so the geometry is exact. Eq. (5) is exactly the camera-to-frame assignment produced by a <span class="mono">repeat</span>-for-<span class="mono">repeat_interleave</span> ordering error in our attempt-1 code. We keep it as an explicit option.</p>
+
+      <div class="algo" role="figure" aria-label="Algorithm 1">
+        <div class="ttl">Algorithm 1&nbsp; One training step of SA-VM (B = 2)</div>
+        <ol>
+          <li>for b in {0, 1}: draw J<sup>b</sup>; with prob. 0.5 draw a mirror A<sup>b</sup>, else A<sup>b</sup> ← I; G<sup>b</sup> ← A<sup>b</sup> J<sup>b</sup> G</li>
+          <li><span class="in">y<sup>b</sup>, y<sup>b</sup><sub>t−1</sub> ← A<sup>b</sup> J<sup>b</sup> (y, y<sub>t−1</sub>)</span> <span class="c">▹ labels follow the scene, Eq. (4)</span></li>
+          <li>for each camera v: μ ← (b + v) mod 2; lift Φ(I<sup>b</sup><sub>v</sub>) with (G<sup>μ</sup>)<sup>−1</sup> <span class="c">▹ Eq. (5)</span></li>
+          <li>fuse cameras and decode Ĥ, Ô, Δ̂ <span class="c">▹ Eq. (2)</span></li>
+          <li>L ← focal(Ĥ, y<sup>b</sup>) + L1(Ô) + smoothL1(Δ̂, y<sup>b</sup><sub>t−1</sub>) + image loss; accumulate gradients over 8 batches</li>
+        </ol>
+      </div>
+
+      <h3>3.5&nbsp;&nbsp;Implementation details</h3>
+      <p>We use ResNet-18 pre-trained on ImageNet, input 720 × 1280 with random resize in [0.8, 1.2] and crop jitter [5], and a voxel grid of 360 × 120 × 4 over 36 × 12 × 2 m. We train for 30 epochs with Adam and a one-cycle schedule (peak learning rate 10<sup>−3</sup>), batch size 2 with gradient accumulation over 8 (effective 16), gradient clipping 0.5, fp32, no temporal feature cache, and a scene-augmentation probability of 0.5. A run takes about 24 minutes on one A100-80GB.</p>
+
+      <h3>3.6&nbsp;&nbsp;Evaluation protocol</h3>
+      <p>We train on WILDTRACK [6] frames 0–359 and test on frames 360–399 (952 annotated detections). A detection is a true positive within <var>r</var> = 0.5 m [1]. We report MODA and MODP for detection, and MOTA and IDF1 for tracking, from the last epoch with τ = 0.5 and TrackTacular's tracker. No parameter is tuned on the test frames. Each configuration is trained with seeds {1, 2, 80085}. We compare against a baseline retrained under identical settings with a paired <var>t</var>-test over seeds, and against published single runs with a one-sample <var>t</var>-test.</p>
+
+      <h2>4&nbsp;&nbsp;Results</h2>
+      <div class="tablewrap">
+        <table>
+          <caption>Table 1. WILDTRACK test. Mean ± std over 3 seeds for our runs. Published numbers are single runs.</caption>
+          <thead><tr><th>Method</th><th>MODA</th><th>MODP</th><th>Prec.</th><th>Recall</th><th>MOTA</th><th>IDF1</th></tr></thead>
+          <tbody>
+            <tr><td>TrackTacular, bilinear [1] (published)</td><td>92.1</td><td>76.2</td><td>97.0</td><td>95.1</td><td>91.8</td><td>95.3</td></tr>
+            <tr><td>GRACE, 7 cameras [2] (published)</td><td>92.58</td><td>80.33</td><td>96.42</td><td>96.15</td><td>91.04</td><td>94.53</td></tr>
+            <tr><td>TrackTacular, retrained by [2]</td><td>88.50</td><td>78.56</td><td>97.42</td><td>91.39</td><td>89.71</td><td>94.00</td></tr>
+            <tr><td>TrackTacular, retrained (ours)</td><td>91.14 ± 0.34</td><td>72.83 ± 4.10</td><td>95.88 ± 0.27</td><td>95.24 ± 0.30</td><td>89.29 ± 0.46</td><td>93.40 ± 0.88</td></tr>
+            <tr class="hl"><td>SA-VM (ours)</td><td>91.88 ± 0.24</td><td>79.74 ± 0.29</td><td>97.43 ± 0.13</td><td>94.36 ± 0.12</td><td>92.19 ± 0.62</td><td>95.38 ± 0.53</td></tr>
+            <tr><td>Δ vs. retrained, paired (p)</td><td class="up">+0.74 (0.117)</td><td class="up">+6.91</td><td class="up">+1.55</td><td>−0.88</td><td class="up">+2.91 (0.013)</td><td class="up">+1.98 (0.010)</td></tr>
+            <tr><td>Δ vs. published [1] (p)</td><td>−0.22 (0.257)</td><td class="up">+3.54</td><td class="up">+0.43</td><td>−0.74</td><td class="up">+0.39 (0.385)</td><td class="up">+0.08 (0.819)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>SA-VM improves on the identically retrained baseline on every seed and every primary metric. The per-seed gains are +0.32, +0.63 and +1.26 MODA; +2.52, +2.63 and +3.57 MOTA; and +2.31, +1.62 and +2.02 IDF1. The MOTA and IDF1 gains are significant at <var>p</var> &lt; 0.05. Against the published TrackTacular, all differences are within seed noise: SA-VM is on par in detection and slightly above in tracking. The gain is larger in tracking than in detection, and precision rises while recall drops slightly. This is consistent with view mixing suppressing evidence that only some views support.</p>
+
+      <div class="tablewrap">
+        <table>
+          <caption>Table 2. Ablation at seed 80085 (one seed; screening only).</caption>
+          <thead><tr><th>Configuration</th><th>MODA</th><th>MOTA</th><th>IDF1</th><th>Det. FN</th><th>Det. FP</th></tr></thead>
+          <tbody>
+            <tr><td>Retrained baseline</td><td>90.76</td><td>89.08</td><td>93.40</td><td>47</td><td>41</td></tr>
+            <tr><td>+ scene augmentation, no mixing (A2f)</td><td>91.49</td><td>90.76</td><td>94.51</td><td>45</td><td>36</td></tr>
+            <tr class="hl"><td>+ scene augmentation + view mixing (SA-VM)</td><td>92.02</td><td>92.65</td><td>95.42</td><td>53</td><td>23</td></tr>
+            <tr><td>+ scene augmentation + VGF [2] (M2c)</td><td>92.23</td><td>89.92</td><td>94.61</td><td>34</td><td>40</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>With configurations otherwise identical, removing view mixing costs 1.89 MOTA and 0.90 IDF1, and nearly doubles false positives (23 to 36). Adding GRACE's volumetric-guided fusion instead [2] gives the best MODA but the worst MOTA.</p>
+
+      <h3>4.1&nbsp;&nbsp;Limitations</h3>
+      <p>The ablation in Table 2 uses one seed. A confirming run of A2f at seed 2 is pending. Mixing always perturbs the same cameras (odd indices). Randomising the subset, and setting the mixing rate independently of the scene-augmentation rate, are untested. Our novelty check covers only the 20 papers we downloaded. None of them lifts a subset of views with a deliberately wrong reference frame: MVAug's view augmentation keeps views aligned [3, §3], and Simple-BEV uses camera dropout [5]. If view mixing acts as calibration-noise training, it should improve robustness to calibration error, where TrackTacular degrades sharply [4, Tab. 5]. We have not yet measured this. Finally, the test split has 40 frames, so one error moves MODA by 0.105 points.</p>
+
+      <h2>References</h2>
+      <ol class="refs">
+        <li>[1] Teepe et al. Lifting Multi-View Detection and Tracking to the Bird's Eye View (TrackTacular). CVPRW 2024. Tab. 1–2.</li>
+        <li>[2] Sakai et al. GRACE: Geometry- and Ray-Aware Camera-Efficient Multi-View Pedestrian Tracking. 2026. Tab. 1.</li>
+        <li>[3] Engilberge et al. Two-level Data Augmentation for Calibrated Multi-view Detection (MVAug). WACV 2023. §3, Tab. 2, 4.</li>
+        <li>[4] Toida et al. ATLASFusion. 2025. Tab. 5.</li>
+        <li>[5] Harley et al. Simple-BEV. ICRA 2023.</li>
+        <li>[6] Chavdarova et al. The WILDTRACK Multi-Camera Person Dataset. 2017.</li>
+      </ol>
+    </article>
+  </section>
+
+  <footer>Numbers come from attempt 1 (for_claude.zip, 2026-11-08, commit 06a0685) and methodology 2 (for_claude.zip, 2026-11-10, commit 73e1ed1). Published numbers were read from the PDFs in research-methodology-2/papers/. The paired tests are two-sided, with 2 degrees of freedom.</footer>
+</div>
+
+<script>
+(function () {
+  const NS = 'http://www.w3.org/2000/svg';
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  function el(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function text(parent, x, y, str, o = {}) {
+    const t = el('text', { x, y, 'text-anchor': o.anchor || 'middle', 'font-family': o.mono ? css('--font-mono') : css('--font-body'),
+      'font-size': o.size || 12.5, 'font-weight': o.weight || 400, fill: o.fill || css('--ink') }, parent);
+    t.textContent = str;
+    return t;
+  }
+
+  // ---------------------------------------------------------------- Figure 1
+  function drawFigure(host) {
+    host.replaceChildren();
+    const svg = el('svg', { viewBox: '0 0 1000 470', role: 'img', 'aria-label': 'Figure 1: SA-VM pipeline from camera images to tracks' }, host);
+    const C = { ink: css('--ink'), ink2: css('--ink-2'), ink3: css('--ink-3'), rule: css('--rule'), base: css('--base-fill'), paper: css('--paper'),
+      aug: css('--aug'), augF: css('--aug-fill'), mix: css('--mix'), mixF: css('--mix-fill') };
+    const kinds = { base: [C.base, C.ink3], aug: [C.augF, C.aug], mix: [C.mixF, C.mix] };
+    function box(x, y, w, h, lines, kind = 'base', dashed = false) {
+      const [f, s] = kinds[kind];
+      el('rect', { x, y, width: w, height: h, rx: 6, fill: f, stroke: s, 'stroke-width': kind === 'base' ? 1.2 : 1.8, 'stroke-dasharray': dashed ? '6 4' : 'none' }, svg);
+      const lh = 16, y0 = y + h / 2 - (lines.length - 1) * lh / 2 + 4;
+      lines.forEach((l, i) => text(svg, x + w / 2, y0 + i * lh, l.t !== undefined ? l.t : l,
+        { weight: i === 0 ? 600 : 400, fill: i === 0 ? (kind === 'base' ? C.ink : s) : C.ink2, size: i === 0 ? 13 : 12, mono: l.mono }));
+      return { x, y, w, h, cx: x + w / 2, cy: y + h / 2, r: x + w, b: y + h };
+    }
+    function arrow(pts, color = C.ink2, dashed = false) {
+      const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ',' + p[1]).join('');
+      el('path', { d, fill: 'none', stroke: color, 'stroke-width': 1.6, 'stroke-dasharray': dashed ? '5 4' : 'none' }, svg);
+      const [x1, y1] = pts[pts.length - 2], [x2, y2] = pts[pts.length - 1];
+      const a = Math.atan2(y2 - y1, x2 - x1), L = 8, W = 4.5;
+      const p1 = [x2 - L * Math.cos(a) + W * Math.sin(a), y2 - L * Math.sin(a) - W * Math.cos(a)];
+      const p2 = [x2 - L * Math.cos(a) - W * Math.sin(a), y2 - L * Math.sin(a) + W * Math.cos(a)];
+      el('path', { d: `M${x2},${y2}L${p1[0]},${p1[1]}L${p2[0]},${p2[1]}Z`, fill: color }, svg);
+    }
+
+    // camera stack
+    for (let i = 2; i >= 0; i--) {
+      el('rect', { x: 20 + i * 7, y: 168 - i * 7, width: 104, height: 70, rx: 4, fill: C.paper, stroke: C.ink3, 'stroke-width': 1.2 }, svg);
+    }
+    // tiny "scene" in front image
+    el('line', { x1: 24, y1: 222, x2: 120, y2: 206, stroke: C.rule, 'stroke-width': 1.5 }, svg);
+    [[50, 196], [74, 200], [98, 192]].forEach(([x, y]) => {
+      el('circle', { cx: x, cy: y - 12, r: 4, fill: C.ink3 }, svg);
+      el('rect', { x: x - 3.5, y: y - 7, width: 7, height: 16, rx: 2, fill: C.ink3 }, svg);
+    });
+    text(svg, 72, 262, '7 camera images', { weight: 600, size: 13 });
+    text(svg, 72, 278, 'I₁ … I₇, 720 × 1280', { size: 12, fill: C.ink2 });
+
+    const enc = box(160, 168, 130, 84, ['Shared encoder Φ', 'ResNet-18', '128 × 90 × 160']);
+    const lift = box(330, 160, 170, 100, ['Bilinear lifting', 'Eq. (1) / (5)', 'voxels 360 × 120 × 4', '10 × 10 × 50 cm']);
+    const fuse = box(540, 168, 130, 84, ['Fuse 7 cameras', 'concat + Conv3d', 'fold height']);
+    const bev = box(705, 168, 110, 84, ['BEV features', '120 × 360']);
+    const heads = box(850, 150, 130, 120, ['Decoder heads', 'center heatmap', 'sub-cell offset', 'tracking offset', 'image heatmaps']);
+
+    const calib = box(20, 24, 150, 64, ['Calibration', 'Kᵥ, Tᵥ, grid map G']);
+    const aug = box(205, 24, 210, 64, ['Scene augmentation', 'Gᵇ = Aᵇ Jᵇ G  (p = 0.5)', 'Aᵇ: mirror x, y or both'], 'aug', true);
+    const mix = box(450, 24, 250, 64, ['Cross-sample view mixing', 'camera v uses G^μ(b,v)', 'odd-index cameras ← partner'], 'mix', true);
+
+    const gt = box(205, 360, 230, 64, ['Labels follow the scene', 'yᵇ = Aᵇ Jᵇ y  (frames t, t−1)', 'Eq. (4)'], 'aug', true);
+    const loss = box(560, 360, 250, 64, ['Training loss', 'focal + L1 + smooth-L1 + image', 'uncertainty-weighted'], 'base', true);
+    const inf = box(850, 360, 130, 64, ['Inference', 'peaks > 0.5', 'tracker → IDs']);
+
+    arrow([[132, 210], [enc.x, 210]]);
+    arrow([[enc.r, 210], [lift.x, 210]]);
+    arrow([[lift.r, 210], [fuse.x, 210]]);
+    arrow([[fuse.r, 210], [bev.x, 210]]);
+    arrow([[bev.r, 210], [heads.x, 210]]);
+    arrow([[calib.r, 56], [aug.x, 56]]);
+    arrow([[aug.r, 56], [mix.x, 56]]);
+    arrow([[475, mix.b], [475, lift.y]], C.mix);
+    text(svg, 482, 130, 'per-camera', { anchor: 'start', size: 11.5, fill: C.ink2 });
+    text(svg, 482, 144, 'projection', { anchor: 'start', size: 11.5, fill: C.ink2 });
+    arrow([[310, aug.b], [310, gt.y]], C.aug, true);
+    arrow([[gt.r, 392], [loss.x, 392]], C.aug, true);
+    arrow([[880, heads.b], [880, 330], [loss.cx, 330], [loss.cx, loss.y]], C.ink2, true);
+    arrow([[950, heads.b], [950, inf.y]]);
+
+    // legend
+    const ly = 452;
+    [[C.base, C.ink3, 'TrackTacular baseline', false], [C.augF, C.aug, 'borrowed: MVAug scene augmentation', false], [C.mixF, C.mix, 'ours: view mixing', false], [C.paper, C.ink3, 'training only', true]]
+      .reduce((x, [f, s, label, dash]) => {
+        el('rect', { x, y: ly - 11, width: 22, height: 14, rx: 3, fill: f, stroke: s, 'stroke-width': 1.5, 'stroke-dasharray': dash ? '4 3' : 'none' }, svg);
+        const t = text(svg, x + 30, ly, label, { anchor: 'start', size: 12, fill: C.ink2 });
+        return x + 30 + label.length * 6.6 + 26;
+      }, 20);
+  }
+
+  // ---------------------------------------------------------------- toy
+  const PEOPLE = [[5, 3], [9, 8.2], [14, 5], [19.5, 9.6], [24.5, 2.6], [29.5, 7], [33, 10.2]];
+  const FLIP = { none: (p) => p, lr: ([x, y]) => [36 - x, y], tb: ([x, y]) => [x, 12 - y], both: ([x, y]) => [36 - x, 12 - y] };
+  function drawToy() {
+    const host = document.getElementById('toy-svg'); host.replaceChildren();
+    const W = 720, H = 260, pad = 20, s = (W - 2 * pad) / 36;
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Top-down map with labels and camera evidence' }, host);
+    const self = document.getElementById('flip-self').value, partner = document.getElementById('flip-partner').value;
+    const mix = document.getElementById('mix-on').checked;
+    const X = (x) => pad + x * s, Y = (y) => pad + y * s;
+    el('rect', { x: pad, y: pad, width: 36 * s, height: 12 * s, fill: css('--soft'), stroke: css('--rule'), 'stroke-width': 1, rx: 4 }, svg);
+    for (let gx = 6; gx < 36; gx += 6) el('line', { x1: X(gx), x2: X(gx), y1: pad, y2: pad + 12 * s, stroke: css('--rule'), 'stroke-width': 1 }, svg);
+    for (let gy = 6; gy < 12; gy += 6) el('line', { x1: pad, x2: pad + 36 * s, y1: Y(gy), y2: Y(gy), stroke: css('--rule'), 'stroke-width': 1 }, svg);
+    text(svg, pad + 36 * s, H - 4, '36 m', { anchor: 'end', size: 11.5, fill: css('--ink-3') });
+    text(svg, pad, H - 4, '0', { anchor: 'start', size: 11.5, fill: css('--ink-3') });
+    let agree = 0;
+    PEOPLE.forEach((p) => {
+      const lab = FLIP[self](p), good = FLIP[self](p), mixed = mix ? FLIP[partner](p) : FLIP[self](p);
+      el('circle', { cx: X(good[0]), cy: Y(good[1]), r: 11, fill: 'none', stroke: css('--aug'), 'stroke-width': 2.5 }, svg);
+      el('circle', { cx: X(mixed[0]), cy: Y(mixed[1]), r: 16, fill: 'none', stroke: css('--mix'), 'stroke-width': 2.5, 'stroke-dasharray': '5 3' }, svg);
+      el('circle', { cx: X(lab[0]), cy: Y(lab[1]), r: 5, fill: css('--ink') }, svg);
+      if (Math.hypot(mixed[0] - lab[0], mixed[1] - lab[1]) < 0.01) agree++;
+    });
+    const read = document.getElementById('toy-read');
+    read.replaceChildren();
+    const b = document.createElement('b');
+    if (!mix) { b.textContent = 'All 7 cameras agree with the labels. '; read.append(b, 'This is ordinary scene augmentation, without mixing.'); }
+    else if (self === partner) { b.textContent = 'All 7 cameras agree with the labels. '; read.append(b, 'Both frames drew the same flip, so mixing changes nothing. This happens in 1 of 3 batches.'); }
+    else { b.textContent = '4 cameras agree with the labels; cameras 2, 4 and 6 point to the wrong places. '; read.append(b, 'The network has to trust the cameras that agree. This happens in 2 of 3 batches.'); }
+  }
+
+  // ---------------------------------------------------------------- tabs
+  const tabs = [['tab-learn', 'learn'], ['tab-paper', 'paper']];
+  function show(id) {
+    tabs.forEach(([t, p]) => {
+      const on = p === id;
+      document.getElementById(t).setAttribute('aria-selected', String(on));
+      document.getElementById(p).hidden = !on;
+    });
+    drawAll();
+  }
+  tabs.forEach(([t, p]) => document.getElementById(t).addEventListener('click', () => { show(p); try { history.replaceState(null, '', '#' + p); } catch (e) {} }));
+
+  function drawAll() {
+    drawFigure(document.getElementById('fig-learn'));
+    drawFigure(document.getElementById('fig-paper'));
+    drawToy();
+  }
+  ['flip-self', 'flip-partner', 'mix-on'].forEach((id) => document.getElementById(id).addEventListener('change', drawToy));
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawAll);
+  new MutationObserver(drawAll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  show(location.hash === '#paper' ? 'paper' : 'learn');
+})();
+</script>

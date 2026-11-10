@@ -39,7 +39,12 @@ NEW_NAMES = {'M2': 'M2 (proposed): scene aug + VGF + rays + diversity prior',
              'M2c': 'M2c: as M2 with GRACE coverage prior',
              'A2f': 'A2f: scene aug only, bug fixed',
              'VD': 'VD: VGF + rays + diversity prior, no scene aug',
-             'M2cx': 'M2cx: M2c + view mixing (old batch order on purpose)'}
+             'M2cx': 'M2cx: M2c + view mixing (old batch order on purpose)',
+             'A2x': 'A2x: SA-VM, scene aug + view mixing of cameras 1,3,5 (deliberate)',
+             'RVM': 'RVM: scene aug + random view mixing (p = 3/7 per camera)',
+             'CD': 'CD: scene aug + camera dropout (control)'}
+ROBUST_NAMES = {'attempt1_E0': 'attempt 1: retrained TrackTacular (E0)', 'attempt1_A2': 'attempt 1: SA-VM (A2)'}
+CONDITIONS = ['clean', 'tta', 'calib_low', 'calib_high', 'drop1', 'drop2']
 
 
 def md_table(df):
@@ -64,6 +69,45 @@ def summary_rows(df, names, kind):
             r[m] = fmt(g[m].mean(), g[m].std() if len(g) > 1 else None)
         rows.append(r)
     return rows
+
+
+def robust_section(root):
+    """Methodology 3: clean, mirror TTA, calibration noise and camera failures (evaluation/robust_eval.py)."""
+    files = glob.glob(osp.join(root, 'robust', '*.csv'))
+    if not files:
+        return []
+    r = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    per_ckpt = r.groupby(['variant', 'seed', 'condition'], as_index=False)[['moda', 'mota', 'idf1']].mean()
+    names = {**NEW_NAMES, **ROBUST_NAMES}
+    out = ['## Methodology 3: test-time mirrors and robustness (protocol thr0.5|tt)', '',
+           'Mean ± std over seeds. calib = Gaussian extrinsic noise per camera (low 0.5 deg / 0.05 m, high 2.0 deg / '
+           '0.2 m; ATLASFusion Tab. 5 magnitudes), 3 draws, identical for every model. drop1 = each single camera off, '
+           'drop2 = 7 camera pairs off.', '']
+    for m in PRIMARY:
+        rows = []
+        for variant, g in per_ckpt.groupby('variant', sort=True):
+            row = {'configuration': names.get(variant, variant), 'seeds': g.seed.nunique()}
+            for c in CONDITIONS:
+                v = g[g.condition == c][m]
+                row[c] = fmt(v.mean(), v.std() if len(v) > 1 else None) if len(v) else '-'
+            rows.append(row)
+        out += [f'### {m.upper()}', '', md_table(pd.DataFrame(rows)), '']
+    # paired by seed: every variant against attempt-1 E0, per condition
+    ref = per_ckpt[per_ckpt.variant == 'attempt1_E0']
+    if len(ref):
+        out += ['### Paired against attempt-1 E0, same seed (mean difference over common seeds)', '']
+        rows = []
+        for variant, g in per_ckpt[per_ckpt.variant != 'attempt1_E0'].groupby('variant', sort=True):
+            j = g.merge(ref, on=['seed', 'condition'], suffixes=('', '_e0'))
+            if not len(j):
+                continue
+            row = {'configuration': names.get(variant, variant), 'seeds': j.seed.nunique()}
+            for c in CONDITIONS:
+                jc = j[j.condition == c]
+                row[c] = ' / '.join(f'{(jc[m] - jc[m + "_e0"]).mean():+.2f}' for m in PRIMARY) if len(jc) else '-'
+            rows.append(row)
+        out += ['Cells: MODA / MOTA / IDF1 difference.', '', md_table(pd.DataFrame(rows)), '']
+    return out
 
 
 def main():
@@ -122,7 +166,13 @@ def main():
                     ('M2', 'A2f', 'H4: VGF + rays on top of scene augmentation'),
                     ('M2', 'VD', 'share of scene augmentation'),
                     ('M2c', 'A2f', 'VGF + rays (coverage prior) on top of scene augmentation'),
-                    ('M2cx', 'M2c', 'view mixing on top of M2c')):
+                    ('M2cx', 'M2c', 'view mixing on top of M2c'),
+                    ('A2x', 'A2f', 'H5: deliberate view mixing vs none'),
+                    ('RVM', 'A2x', 'H7: random vs fixed view mixing'),
+                    ('RVM', 'A2f', 'random view mixing vs none'),
+                    ('CD', 'A2f', 'camera dropout vs none'),
+                    ('A2x', 'CD', 'H11: view mixing vs camera dropout'),
+                    ('RVM', 'CD', 'H11: random view mixing vs camera dropout')):
         for seed in sorted(set(prim[prim.variant == a].seed) & set(prim[prim.variant == b].seed)):
             ra = prim[(prim.variant == a) & (prim.seed == seed)].iloc[0]
             rb = prim[(prim.variant == b) & (prim.seed == seed)].iloc[0]
@@ -133,6 +183,7 @@ def main():
               prim[['variant', 'seed', 'det_fn', 'det_fp', 'trk_misses', 'trk_fp', 'id_switches', 'moda', 'mota', 'idf1']]
               .sort_values(['variant', 'seed']).pipe(md_table), '']
 
+    lines += robust_section(args.results)
     text = '\n'.join(lines)
     open(osp.join(args.results, 'REPORT.md'), 'w').write(text)
     print(text)

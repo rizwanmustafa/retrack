@@ -29,7 +29,8 @@ class Segnet(nn.Module):
                  vgf=False,
                  ray_cond=False,
                  vgf_prior='diversity',
-                 view_mix=False):
+                 view_mix=False,
+                 view_mix_random=0.0):
         """
         Research methodology 2 (research-methodology-2/METHODOLOGY.md), all off by default:
         vgf:       volumetric-guided fusion of this (volumetric) BEV feature with a homography-projected one, GRACE Eq. 3-5
@@ -40,6 +41,8 @@ class Segnet(nn.Module):
         view_mix:  training only. Reproduces on purpose the old repeat() order: with batch 2, cameras 1, 3, 5 of each
                    sample are lifted in the other sample's (scene-augmented) reference frame while the targets stay.
                    Attempt 1's A2 trained this way and tracked better than the fixed A2f (research-methodology-2)
+        view_mix_random: training only. Random view mixing: each camera of each sample is independently lifted in the
+                   partner sample's reference frame with this probability (3/7 matches view_mix's three cameras)
         """
         super(Segnet, self).__init__()
         assert (encoder_type in ['res101', 'res50', 'effb0', 'effb4', 'res18', 'vgg11', 'swin_t'])
@@ -61,7 +64,9 @@ class Segnet(nn.Module):
         self.vgf = vgf
         self.ray_cond = ray_cond
         self.vgf_prior = vgf_prior
+        assert not (view_mix and view_mix_random > 0), 'choose one of view_mix (fixed cameras) and view_mix_random'
         self.view_mix = view_mix
+        self.view_mix_random = view_mix_random
 
         self.register_buffer('mean', torch.as_tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1), persistent=False)
         self.register_buffer('std', torch.as_tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1), persistent=False)
@@ -166,8 +171,14 @@ class Segnet(nn.Module):
         global_T_cams_ = torch.inverse(cams_T_global_)  # B*S,4,4
         # repeat_interleave matches pack_seqdim's b-major order; repeat() gave camera i the frame of sample i % B,
         # which mattered once samples of a batch have different (scene-augmented) reference frames
-        ref_T_cams_global = ref_T_global.repeat(S, 1, 1) if (self.view_mix and self.training) \
-            else ref_T_global.repeat_interleave(S, dim=0)
+        if self.training and self.view_mix_random > 0 and B > 1:
+            own = torch.arange(B, device=ref_T_global.device).repeat_interleave(S)  # b-major, as pack_seqdim
+            swap = torch.rand(B * S, device=ref_T_global.device) < self.view_mix_random
+            ref_T_cams_global = ref_T_global[torch.where(swap, (own + 1) % B, own)]
+        elif self.training and self.view_mix:
+            ref_T_cams_global = ref_T_global.repeat(S, 1, 1)
+        else:
+            ref_T_cams_global = ref_T_global.repeat_interleave(S, dim=0)
         ref_T_cams = torch.matmul(ref_T_cams_global, global_T_cams_)  # B*S,4,4
         cams_T_ref_ = torch.inverse(ref_T_cams)  # B*S,4,4
 
