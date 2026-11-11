@@ -128,7 +128,7 @@ footer { color: var(--ink-3); font-size: 13px; }
   <header>
     <div class="eyebrow">Multi-view pedestrian detection and tracking · WILDTRACK · research methodology</div>
     <h1>SA-VM: scene augmentation with cross-sample view mixing</h1>
-    <p class="lede">TrackTacular, trained with scene flips and with some cameras deliberately placed using the other sample's flip. Over three seeds this matches TrackTacular's published numbers and clearly beats our own retrained TrackTacular. Methodology 3 adds four pieces that cost little: random view mixing, mirror test-time flips, a calibration and camera-failure stress test, and a camera-dropout control.</p>
+    <p class="lede">TrackTacular, trained with scene flips and with some cameras deliberately placed using the other sample's flip. Over three seeds this matches TrackTacular's published numbers and clearly beats our own retrained TrackTacular. Methodology 3 tested cheap additions on top. Random view mixing and mirror test-time flips made things worse. The stress tests show SA-VM copes somewhat better with small calibration errors and worse with failed cameras. The camera-dropout control is still to run.</p>
   </header>
 
   <div class="summary" aria-label="Headline results, mean over three seeds">
@@ -146,7 +146,7 @@ footer { color: var(--ink-3); font-size: 13px; }
   <section id="learn" role="tabpanel" aria-labelledby="tab-learn" style="display:grid;gap:28px">
     <div class="figure">
       <div class="figscroll" id="fig-learn"></div>
-      <p class="figcap"><b>Figure 1.</b> The whole pipeline, left to right. Grey boxes are the unchanged TrackTacular baseline. Blue is scene augmentation, borrowed from MVAug. Orange is ours: view mixing (fixed or random) and mirror test-time augmentation. Dashed boxes run only during training. The stress tests (step 12) reuse the same pipeline with perturbed calibration or cameras switched off.</p>
+      <p class="figcap"><b>Figure 1.</b> The whole pipeline, left to right. Grey boxes are the unchanged TrackTacular baseline. Blue is scene augmentation, borrowed from MVAug. Orange is ours: cross-sample view mixing. Random mixing and mirror test-time augmentation were tested and dropped (Table 3). Dashed boxes run only during training. The stress tests (step 12) reuse the same pipeline with perturbed calibration or cameras switched off.</p>
     </div>
 
     <div class="steps">
@@ -229,12 +229,14 @@ footer { color: var(--ink-3); font-size: 13px; }
         <h3>Random view mixing <span class="tag mix">ours, new in methodology 3</span></h3>
         <p>The accidental version always misplaces the same three cameras, which looks like a quirk. The deliberate version picks cameras at random: during training, each camera takes the other frame's flip with probability 3/7. On average that is the same three cameras as before, but a different three every time.</p>
         <p>If this works as well or better, view mixing is a general principle, not an accident of which cameras were hit. The code option is <span class="mono">--model.view_mix_random 0.4286</span>, and the variant is called RVM.</p>
+        <p class="note"><b>Result (session 1, one seed): it did not work.</b> RVM got 90.65 MODA, 90.86 MOTA and 94.64 IDF1, against 92.02, 92.65 and 95.42 for fixed mixing at the same seed. It missed 62 people, against 53. Under small calibration errors it collapsed to 43 MODA. Random mixing is not a replacement for fixed mixing, and we do not yet know why the two behave so differently.</p>
       </div></div>
 
       <div class="step ours"><span class="n">11</span><div class="body">
         <h3>Mirror test-time flips <span class="tag mix">ours, applied at test time</span></h3>
         <p>Our model was trained on all four mirror versions of the map. At test time we run it four times, once per mirror, flip each heatmap back, and average them. Averaging four slightly different opinions removes some noise in the heatmap. A plain TrackTacular never saw mirrored maps, so for it we expect no gain. That makes it a check on our explanation.</p>
         <p>The flip is exact on this grid: cell <var>i</var> maps onto cell 359 − <var>i</var>, with no shift. It needs no retraining, and 40 test frames take seconds.</p>
+        <p class="note"><b>Result: it hurt every model.</b> SA-VM lost 4.8 to 6.4 MODA, and scene augmentation without mixing lost about 2. Averaging four heatmaps lowers the peak for people that some mirrors miss, so more peaks fall below the 0.5 threshold and become misses. The plain TrackTacular lost 37 to 46 MODA, as expected for a model that never saw mirrored maps. We dropped mirror TTA.</p>
       </div></div>
 
       <div class="step ours"><span class="n">12</span><div class="body">
@@ -246,6 +248,7 @@ footer { color: var(--ink-3); font-size: 13px; }
         </ul>
         <p>The checkpoints of our 3 retrained TrackTacular runs and 3 SA-VM runs from attempt 1 are still on Drive. So this comparison gets 3 seeds without any new training.</p>
         <p class="note">Control: <b>camera dropout</b> (CD) switches cameras off during training instead of misplacing them, at a matched rate. If CD does as well as view mixing, our idea is just dropout under another name. If it does worse, misplacing evidence teaches something that removing it does not.</p>
+        <p class="note"><b>Result (3 seeds, SA-VM vs our retrained TrackTacular):</b> with small calibration errors SA-VM is ahead on every seed, by 5.8 MOTA and 9.0 IDF1 on average. That is suggestive, but with 3 seeds it is not statistically significant (p ≈ 0.06–0.08). With large errors every model fails, and SA-VM fails worse. When cameras are switched off SA-VM loses more than the baseline (2 cameras off: −1.75 MODA, p = 0.012). It already misses a few more people on clean data, and missing cameras make that worse. Camera dropout (CD) has not been run yet.</p>
       </div></div>
 
       <div class="step"><span class="n">13</span><div class="body">
@@ -261,7 +264,7 @@ footer { color: var(--ink-3); font-size: 13px; }
 
       <div class="step"><span class="n">14</span><div class="body">
         <h3>What we found</h3>
-        <p>We trained each model three times with different random seeds (1, 2, 80085), because results move by 0.3–1.5 points from seed to seed. Against our own retrained TrackTacular, SA-VM wins on every seed and every metric. Against the paper's single run it is level: none of the differences is statistically meaningful. The tables are in the paper version.</p>
+        <p>We trained each model three times with different random seeds (1, 2, 80085), because results move by 0.3–1.5 points from seed to seed. Against our own retrained TrackTacular, SA-VM wins on every seed and every metric. Against the paper's single run it is level: none of the differences is statistically meaningful. A second seed of scene augmentation without mixing confirms that the mixing is what matters: removing it costs 3.05 MOTA at seed 2 and 1.89 at seed 80085. The pattern behind the gain is fewer false detections (15 fewer per test set) at the cost of a few more misses (8 more). The tables are in the paper version.</p>
       </div></div>
 
       <div class="step"><span class="n">15</span><div class="body">
@@ -271,15 +274,16 @@ footer { color: var(--ink-3); font-size: 13px; }
             <caption>Colab sessions, about an hour each. Results accumulate in the same Drive folder.</caption>
             <thead><tr><th>Session</th><th>Trains</th><th>Answers</th></tr></thead>
             <tbody>
-              <tr><td>1</td><td>RVM s80085, A2f s2</td><td>random vs fixed mixing; is mixing the cause (2nd seed); TTA and stress tests on every checkpoint</td></tr>
-              <tr><td>2</td><td>CD s80085, RVM s2</td><td>is mixing just dropout; random mixing at a 2nd seed</td></tr>
-              <tr><td>3</td><td>RVM s1, A2f s1</td><td>3 seeds for both</td></tr>
+              <tr><td>1 (done)</td><td>RVM s80085, A2f s2</td><td>random mixing worse; mixing confirmed as the cause (2nd seed); TTA hurts; stress tests on 11 checkpoints</td></tr>
+              <tr><td>2</td><td>A2x s80085, CD s80085</td><td>does SA-VM reproduce in today's code; is mixing just dropout</td></tr>
+              <tr><td>3</td><td>A2x s2, CD s2</td><td>second seed for both</td></tr>
             </tbody>
           </table>
         </div>
         <ul class="tight">
-          <li>The credit for view mixing rests on one seed (A2f at 80085) until session 1 adds seed 2.</li>
-          <li>Random view mixing, mirror TTA and the stress tests have no results yet. Every number on this page comes from runs that already happened.</li>
+          <li>The credit for view mixing now rests on two seeds (A2f at 2 and 80085).</li>
+          <li>SA-VM itself was trained in the attempt-1 code. Session 2 retrains it in today's code (A2x) to confirm it reproduces.</li>
+          <li>The calibration-robustness lead is consistent across 3 seeds but not significant. The camera-failure result goes against us.</li>
           <li>Novelty is checked only against our 20 downloaded papers. None of them trains with deliberately misplaced views: MVAug keeps views aligned, and Simple-BEV uses camera dropout. A wider search is needed before submission.</li>
         </ul>
       </div></div>
@@ -393,23 +397,38 @@ footer { color: var(--ink-3); font-size: 13px; }
           </tbody>
         </table>
       </div>
-      <p>With configurations otherwise identical, removing view mixing costs 1.89 MOTA and 0.90 IDF1, and nearly doubles false positives (23 to 36). Adding GRACE's volumetric-guided fusion instead [2] gives the best MODA but the worst MOTA.</p>
+      <p>With configurations otherwise identical, removing view mixing costs 1.89 MOTA and 0.90 IDF1, and nearly doubles false positives (23 to 36). At seed 2 it costs 3.05 MOTA and 1.89 IDF1, with false positives rising from 23 to 37. Adding GRACE's volumetric-guided fusion instead [2] gives the best MODA but the worst MOTA.</p>
 
       <div class="tablewrap">
         <table>
-          <caption>Table 3. Pending (methodology 3, session 1): robustness and TTA. No numbers yet. The planned comparison is paired over the 3 existing seeds of each model.</caption>
+          <caption>Table 3. Robustness and mirror TTA, MODA, protocol thr0.5|tt. Mean over seeds; calibration noise is the mean of 3 fixed draws, camera failure the mean over 7 single cameras or 7 camera pairs.</caption>
           <thead><tr><th>Model</th><th>Clean</th><th>+ mirror TTA</th><th>Calib. low</th><th>Calib. high</th><th>1 camera off</th><th>2 cameras off</th></tr></thead>
           <tbody>
-            <tr><td>TrackTacular, retrained (3 seeds)</td><td>91.14</td><td>pending</td><td>pending</td><td>pending</td><td>pending</td><td>pending</td></tr>
-            <tr><td>SA-VM (3 seeds)</td><td>91.88</td><td>pending</td><td>pending</td><td>pending</td><td>pending</td><td>pending</td></tr>
-            <tr><td>Random view mixing (RVM)</td><td>pending</td><td>pending</td><td>pending</td><td>pending</td><td>pending</td><td>pending</td></tr>
+            <tr><td>TrackTacular, retrained (3 seeds)</td><td>91.14</td><td>50.11</td><td>72.54</td><td>−9.78</td><td>89.80</td><td>86.98</td></tr>
+            <tr class="hl"><td>SA-VM (3 seeds)</td><td>91.88</td><td>86.13</td><td>75.01</td><td>−15.36</td><td>89.07</td><td>85.23</td></tr>
+            <tr><td>Scene aug., no mixing (A2f, 2 seeds)</td><td>91.39</td><td>89.44</td><td>69.49</td><td>−8.35</td><td>89.74</td><td>86.96</td></tr>
+            <tr><td>Random view mixing (RVM, 1 seed)</td><td>90.65</td><td>76.16</td><td>42.96</td><td>0.04</td><td>87.68</td><td>82.02</td></tr>
           </tbody>
         </table>
       </div>
-      <p>Table 3 reports MODA under each condition; MOTA and IDF1 are reported the same way. For reference, ATLASFusion reports TrackTacular at 50.5 MODA under low and 0.0 under high calibration noise [4, Tab. 5]. Their sampling procedure is not specified, so our numbers are comparable in magnitude only.</p>
+
+      <div class="tablewrap">
+        <table>
+          <caption>Table 4. SA-VM minus retrained TrackTacular, paired by seed (1, 2, 80085). Cells: difference (two-sided paired t-test p).</caption>
+          <thead><tr><th>Condition</th><th>MODA</th><th>MOTA</th><th>IDF1</th></tr></thead>
+          <tbody>
+            <tr><td>Clean</td><td>+0.74 (0.118)</td><td>+2.91 (0.013)</td><td>+1.98 (0.010)</td></tr>
+            <tr class="hl"><td>Calib. low</td><td>+2.47 (0.162)</td><td>+5.84 (0.058)</td><td>+8.99 (0.077)</td></tr>
+            <tr><td>Calib. high</td><td>−5.58 (0.061)</td><td>−6.13 (0.006)</td><td>−4.13 (0.103)</td></tr>
+            <tr><td>1 camera off</td><td>−0.73 (0.136)</td><td>+0.93 (0.152)</td><td>+0.66 (0.022)</td></tr>
+            <tr><td>2 cameras off</td><td>−1.75 (0.012)</td><td>−0.01 (0.986)</td><td>+0.54 (0.268)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Mirror TTA (Eq. 8) lowers MODA for every checkpoint, by 4.8–6.4 for SA-VM and 37–46 for the baseline; the loss is almost entirely missed detections, because averaging lowers peak scores below the fixed threshold. We therefore drop it. Random view mixing (§3.5) is worse than fixed mixing at the same seed (−1.37 MODA, −1.79 MOTA) and far less robust. Under low calibration noise SA-VM leads the baseline on all three seeds in MOTA and IDF1, while scene augmentation without mixing does not (−2.40 MODA), so the lead is due to mixing; it does not reach significance with three seeds. Under high noise all models fail, consistent with TrackTacular's 0.0 MODA in [4, Tab. 5]. Under camera failure SA-VM degrades more than the baseline (degradation difference −2.48 MODA for two cameras off, p = 0.002). With 8.3 more misses and 15.3 fewer false positives on clean data (p = 0.029 and 0.020), SA-VM appears to require agreement among more views; this explains both its clean tracking gain and its camera-failure loss, but we have not tested it directly. ATLASFusion's noise sampling is not specified, so our calibration numbers are comparable to theirs in magnitude only.</p>
 
       <h3>4.1&nbsp;&nbsp;Limitations</h3>
-      <p>The ablation in Table 2 uses one seed. A confirming run of A2f at seed 2 is pending. Random view mixing (§3.5), mirror TTA (§3.6) and the robustness protocol (§3.7) are implemented, but have not been run yet. Our novelty check covers only the 20 papers we downloaded. None of them lifts a subset of views with a deliberately wrong reference frame: MVAug's view augmentation keeps views aligned [3, §3], and Simple-BEV uses camera dropout [5]. If view mixing acts as calibration-noise training, it should improve robustness to calibration error, where TrackTacular degrades sharply [4, Tab. 5]. We have not yet measured this. Finally, the test split has 40 frames, so one error moves MODA by 0.105 points.</p>
+      <p>The ablation in Table 2 has two seeds for A2f (2 and 80085) and one for the other rows. SA-VM was trained in the attempt-1 code; a retrain in the current code (A2x) and the camera-dropout control are pending. Random view mixing has one seed. Our novelty check covers only the 20 papers we downloaded. None of them lifts a subset of views with a deliberately wrong reference frame: MVAug's view augmentation keeps views aligned [3, §3], and Simple-BEV uses camera dropout [5]. The calibration-robustness lead (Table 4) is consistent but not significant with three seeds. Finally, the test split has 40 frames, so one error moves MODA by 0.105 points.</p>
 
       <h2>References</h2>
       <ol class="refs">
@@ -489,11 +508,11 @@ footer { color: var(--ink-3); font-size: 13px; }
 
     const calib = box(20, 24, 150, 64, ['Calibration', 'Kᵥ, Tᵥ, grid map G']);
     const aug = box(205, 24, 210, 64, ['Scene augmentation', 'Gᵇ = Aᵇ Jᵇ G  (p = 0.5)', 'Aᵇ: mirror x, y or both'], 'aug', true);
-    const mix = box(450, 24, 250, 64, ['Cross-sample view mixing', 'fixed: odd cameras ← partner', 'random: each camera, q = 3/7'], 'mix', true);
+    const mix = box(450, 24, 250, 64, ['Cross-sample view mixing', 'odd cameras ← partner’s flip', 'training only'], 'mix', true);
 
     const gt = box(205, 360, 230, 64, ['Labels follow the scene', 'yᵇ = Aᵇ Jᵇ y  (frames t, t−1)', 'Eq. (4)'], 'aug', true);
     const loss = box(560, 360, 250, 64, ['Training loss', 'focal + L1 + smooth-L1 + image', 'uncertainty-weighted'], 'base', true);
-    const inf = box(835, 360, 155, 64, ['Inference + mirror TTA', 'heatmap avg over 4 mirrors', 'peaks > 0.5 → tracker'], 'mix');
+    const inf = box(835, 360, 155, 64, ['Inference', 'exact geometry, no mixing', 'peaks > 0.5 → tracker']);
 
     arrow([[132, 210], [enc.x, 210]]);
     arrow([[enc.r, 210], [lift.x, 210]]);

@@ -5,9 +5,10 @@ table/section** (index in [`PAPERS.md`](PAPERS.md)). Numbers from our own runs a
 results in `for_claude.zip`, 24 runs, 8 variants × 3 seeds. Numbers from reading this repository are cited as **[code]**
 with the file. Anything else is labelled **our choice**.*
 
-> **Status, 2026-11-10.** The VDGF method below was screened and did not beat TrackTacular (§8). The current method is
-> **methodology 3, SA-VM** (§9). It is built on the strongest result we have: scene augmentation with cross-sample view
-> mixing, which matches TrackTacular over 3 seeds. Sections 0–7 are kept as the record of methodology 2.
+> **Status, 2026-11-11.** The VDGF method (§0–7) was screened and did not beat TrackTacular (§8). The current method is
+> **SA-VM**: scene augmentation with fixed cross-sample view mixing, which matches TrackTacular over 3 seeds (§9).
+> Session 1 of methodology 3 (§10) rejected random view mixing and mirror TTA, and showed SA-VM is somewhat more robust
+> to small calibration error but less robust to camera failure. Next run: `A2x:80085 CD:80085`.
 
 ---
 
@@ -351,3 +352,57 @@ Results accumulate in the same Drive folder, and every session's report covers a
   default to off and add no parameters [code: `evaluation/retrack_eval.py` `load_model` asserts an exact state-dict
   match].
 - Novelty of C2/C3 is checked only against [P01–P20]. A wider search is needed before submission.
+
+## 10. Session 1 results (2026-11-11) and amendment 3
+
+Session 1 trained RVM s80085 and A2f s2 (commit 55976ec), and ran the robustness protocol of §9 on 11 checkpoints: the 5
+methodology-2/3 runs and the 6 attempt-1 checkpoints (E0 and A2, seeds 1, 2, 80085). Protocol thr0.5|tt throughout.
+Paired p-values are two-sided paired t-tests over seeds 1, 2, 80085 (df = 2). Source: `for_claude(4).zip`,
+`REPORT.md` and `robust/*.csv`.
+
+### 10.1 Hypotheses
+
+| | verdict | evidence |
+|---|---|---|
+| H5′ | **supported, 2 seeds** | A2f − attempt-1 A2: s80085 −1.89 MOTA / −0.90 IDF1; s2 −3.05 MOTA / −1.89 IDF1, det. FP 23 → 37 |
+| H7 | **rejected, 1 seed** | RVM s80085: 90.65 MODA / 90.86 MOTA / 94.64 IDF1, vs A2 92.02 / 92.65 / 95.42; det. FN 62. Under calib_low it falls to 42.96 MODA (533 FN) |
+| H8 | **rejected** | Mirror TTA lowers MODA on every checkpoint: A2 −4.8 to −6.4, A2f −1.9 / −2.0, M2 −0.4, M2c −1.6, RVM −14.5, E0 −37 to −46. The loss is missed detections: averaging lowers peak scores below 0.5 |
+| H9 | **not supported** | Degradation (cond − clean), A2 − E0: calib_low +1.74 MODA / +2.93 MOTA / +7.01 IDF1 (p = 0.22 / 0.17 / 0.13); calib_high −6.31 / −9.03 / −6.11 (p = 0.055 / 0.005 / 0.060) |
+| H10 | **rejected, opposite sign** | SA-VM loses more when cameras fail: drop1 −1.46 MODA (p = 0.002), −1.98 MOTA (p = 0.007); drop2 −2.48 MODA (p = 0.002), −2.92 MOTA (p = 0.007) |
+| H11 | not run | needs CD |
+
+### 10.2 Absolute numbers, 3 seeds, A2 (SA-VM) − E0, paired
+
+| condition | MODA | MOTA | IDF1 |
+|---|---|---|---|
+| clean | +0.74 (p = 0.118) | +2.91 (p = 0.013) | +1.98 (p = 0.010) |
+| calib_low | +2.47 (p = 0.162) | +5.84 (p = 0.058) | +8.99 (p = 0.077) |
+| calib_high | −5.58 (p = 0.061) | −6.13 (p = 0.006) | −4.13 (p = 0.103) |
+| drop1 | −0.73 (p = 0.136) | +0.93 (p = 0.152) | +0.66 (p = 0.022) |
+| drop2 | −1.75 (p = 0.012) | −0.01 (p = 0.986) | +0.54 (p = 0.268) |
+
+Mean MODA per condition (clean / calib_low / calib_high / drop1 / drop2): E0 91.14 / 72.54 / −9.78 / 89.80 / 86.98;
+SA-VM 91.88 / 75.01 / −15.36 / 89.07 / 85.23; A2f (2 seeds) 91.39 / 69.49 / −8.35 / 89.74 / 86.96. Under low calibration
+noise SA-VM is ahead of E0 on all 3 seeds for MOTA and IDF1, and A2f is not ahead on MODA (−2.40), so what lead there
+is comes from mixing, not from the flips. It does not reach p < 0.05 with 3 seeds. At the high level every model
+collapses (MODA below 0), consistent with TrackTacular's 0.0 in [P03 Tab. 5].
+
+### 10.3 What this says about SA-VM
+
+SA-VM trades misses for false positives: on clean data det. FN +8.3 (p = 0.029) and FP −15.3 (p = 0.020) against E0.
+Under camera loss the trade gets worse (drop2 FN +30.2, p = 0.002), and per-camera losses are larger for odd and even
+cameras alike (odd 2.64 vs 1.68, even 2.93 vs 1.09 MODA), so the network did not learn to distrust cameras 1, 3, 5.
+**Our interpretation**, not tested: mixing teaches the network to require agreement among more views, which removes
+false positives on clean data and costs detections when views are missing or badly wrong.
+
+Note: for VGF models the `clean` row of `robust_eval` differs from `arl_eval` by up to 0.5 points (M2c MOTA 90.44 vs
+89.92); for all other models the two agree exactly. The tables above use only non-VGF models.
+
+### 10.4 Amendment 3
+
+- **Dropped:** random view mixing (C3), mirror TTA (C4). Both are reported as negative results.
+- **Kept:** SA-VM as fixed view mixing (C2) with its clean tracking gain, and the robustness benchmark (C5) as an
+  honest characterisation: better under small calibration error, worse under camera failure.
+- **Next session:** `RUNS='A2x:80085 CD:80085'`. A2x reproduces SA-VM in the current code with the bug fixed and
+  mixing switched on deliberately; it should land near attempt-1 A2 s80085 (92.02 / 92.65 / 95.42). CD answers H11.
+  The robustness stage runs on the 2 new checkpoints only (existing CSVs are skipped). About 75 min on an A100 (each training took 31–32 min in session 1).

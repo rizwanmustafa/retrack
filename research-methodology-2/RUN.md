@@ -69,3 +69,14 @@ EXTRA = '--attempt1 /content/drive/MyDrive/<folder>/arl_full'
 ```
 
 If an hour is the hard limit, use `RUNS = 'A2f:2'`. That still gives the 3-seed robustness result for E0 vs SA-VM.
+
+## Methodology 3, session 2: about 75 minutes on an A100
+
+Session 1 is done (METHODOLOGY.md §10). Same cell as session 1, with:
+
+```python
+RUNS = 'A2x:80085 CD:80085'
+```
+
+A2x reproduces SA-VM in the current code. CD is the camera-dropout control. The robustness stage only evaluates the 2
+new checkpoints, because existing CSVs are skipped. If an hour is the hard limit, use `RUNS = 'A2x:80085'`.
