@@ -28,3 +28,12 @@ are kept locally and not in git (about 200 MB). To fetch them again, use the URL
 
 **[A1]** is attempt 1's results, `for_claude.zip` (2026-11-08, commit 06a0685). The rows used as baselines are in
 `code/baselines_attempt1.csv`.
+
+Added 2026-11-11 for the SA-VM methodology paper (`../sa-vm-paper/`); titles checked against the first page:
+
+| ID | file | paper | used for | URL |
+|---|---|---|---|---|
+| P21 | 21_resnet_1512.03385.pdf | He et al., *Deep Residual Learning for Image Recognition* (ResNet), CVPR 2016 | encoder (ResNet-18) | https://arxiv.org/pdf/1512.03385 |
+| P22 | 22_focal_loss_1708.02002.pdf | Lin et al., *Focal Loss for Dense Object Detection*, ICCV 2017 | heatmap loss | https://arxiv.org/pdf/1708.02002 |
+| P23 | 23_idf1_ristani_1609.01775.pdf | Ristani et al., *Performance Measures and a Data Set for Multi-Target, Multi-Camera Tracking*, ECCVW 2016 | IDF1 | https://arxiv.org/pdf/1609.01775 |
+| P24 | 24_clear_mot_2008.pdf | Bernardin and Stiefelhagen, *Evaluating Multiple Object Tracking Performance: The CLEAR MOT Metrics*, EURASIP JIVP 2008 | MOTA | https://jivp-eurasipjournals.springeropen.com/counter/pdf/10.1155/2008/246309.pdf |
