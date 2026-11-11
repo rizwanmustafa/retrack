@@ -27,13 +27,12 @@
 Early-fusion multi-view detectors lift image features from several calibrated cameras into a shared bird's-eye-view
 (BEV) representation and detect and track pedestrians on the ground plane. On the standard WILDTRACK benchmark they
 are trained on only 360 annotated frames of a single scene, which makes them prone to overfitting to the crowd layouts
-and to the exact camera geometry seen during training. We propose SA-VM, a training scheme that leaves the network
-and its inference unchanged and acts only on the reference frame in which each camera is lifted. Scene augmentation
+and to the exact camera geometry seen during training. We propose SA-VM, an early-fusion network trained with two transformations of the
+reference frame in which each camera is lifted. Scene augmentation
 mirrors the reference frame of each training sample, jointly for all views and the labels. Cross-sample view mixing
 then lifts a fixed subset of the cameras of each sample with the reference frame of the other sample in the batch,
 so that in two thirds of the training batches three of the seven views carry evidence that disagrees with the labels
-while four agree. The network is thereby trained to rely on agreement across views. The scheme adds no parameters
-and no computation. We describe an evaluation protocol with seed-paired statistical comparison against an identically
+while four agree. The network is thereby trained to rely on agreement across views. We describe an evaluation protocol with seed-paired statistical comparison against an identically
 retrained baseline, an ablation of each component, a camera-dropout control, and a robustness study under
 calibration noise and camera failure.
 \end{abstract}
@@ -42,11 +41,12 @@ calibration noise and camera failure.
 \section{Method}
 \label{sec:method}
 
-Figure~\ref{fig:overview} gives an overview. We adopt an early-fusion detection and tracking network with
-bilinear-sampling feature lifting~\cite{teepe2024lifting,harley2023simplebev}
-(Sec.~\ref{sec:network}) and modify only how the reference frame is chosen during training: per sample by scene
-augmentation (Sec.~\ref{sec:sa}) and per camera by cross-sample view mixing (Sec.~\ref{sec:vm}). Inference
-(Sec.~\ref{sec:inference}) is identical to that of the unmodified network.
+Figure~\ref{fig:overview} gives an overview. SA-VM is an early-fusion detection and tracking network with
+bilinear-sampling feature lifting~\cite{teepe2024lifting,harley2023simplebev}, trained with two transformations of
+the reference frame in which each camera is lifted. Sec.~\ref{sec:problem} states the problem and
+Sec.~\ref{sec:network} describes the network. Scene augmentation (Sec.~\ref{sec:sa}) transforms the reference frame
+per sample, and cross-sample view mixing (Sec.~\ref{sec:vm}) assigns reference frames per camera.
+Sec.~\ref{sec:loss} gives the training objective and Sec.~\ref{sec:inference} inference and tracking.
 
 \begin{figure*}[t]
   \centering
@@ -75,11 +75,16 @@ to the position at time $t-1$. A tracker links these detections into trajectorie
 \subsection{Detection and tracking network}
 \label{sec:network}
 
-\paragraph{Image encoder.} A ResNet-18~\cite{he2016resnet} pre-trained on ImageNet, shared by all cameras, maps
-each image to a feature map $\Phi(I_v) \in \R^{C \times H/8 \times W/8}$ with $C = 128$.
+\paragraph{Image encoder.} Each image is resized to $720 \times 1280$ and encoded by a
+ResNet-18~\cite{he2016resnet}, pre-trained on ImageNet and shared by all cameras, with frozen batch-normalisation
+statistics. The stem and the first three residual stages produce features at 1/4, 1/8 and 1/16 of the input
+resolution. The 1/16 features are upsampled twice by bilinear interpolation, concatenated first with the 1/8 and then
+with the 1/4 features, and mixed by $1 \times 1$ convolutions. A final $1 \times 1$ convolution gives the camera
+features $\Phi(I_v) \in \R^{C \times H/4 \times W/4}$ with $C = 128$ ($180 \times 320$).
 
-\paragraph{Feature lifting.} For the centre $\mathbf{x}$ of a voxel in the reference frame, camera $v$ contributes
-the feature
+\paragraph{Feature lifting.} The ground plane is covered by a grid of $X \times Y \times Z = 360 \times 120 \times 4$
+voxels of $10 \times 10 \times 50$\,cm, spanning $36 \times 12 \times 2$\,m. For the centre $\mathbf{x}$ of a voxel in
+the reference frame, camera $v$ contributes the feature
 \begin{equation}
   f_v(\mathbf{x}) = \Phi(I_v)\big\langle \pi\big(\tilde{K}_v\, T_v\, G^{-1}\, \mathbf{x}\big) \big\rangle,
   \label{eq:lift}
@@ -89,21 +94,31 @@ $\langle\cdot\rangle$ denotes bilinear interpolation~\cite{harley2023simplebev}.
 image receive a zero feature. Every voxel along a camera ray therefore receives the feature of the pixel the ray
 passes through, and a pedestrian is localised where the rays of several cameras agree.
 
-\paragraph{Multi-view fusion.} The lifted features are concatenated in a fixed camera order and fused by a 3D
-convolution $\psi$. The height axis is folded into the channels and a 2D convolutional compressor $\rho$ produces the
-BEV feature map
+\paragraph{Multi-view fusion.} The $V$ lifted feature volumes are concatenated along the channel axis in a fixed
+camera order ($V C = 896$ channels). The fusion $\psi$ is a $3 \times 3 \times 3$ convolution to $C$ channels,
+followed by instance normalisation, a ReLU and a $1 \times 1 \times 1$ convolution. The $Z = 4$ height bins are then
+folded into the channels, and the compressor $\rho$, a $3 \times 3$ convolution with instance normalisation and a ReLU
+followed by a $1 \times 1$ convolution, produces the BEV feature map
 \begin{equation}
   B = \rho\Big(\mathrm{fold}_Z\big(\psi([f_1; \dots; f_V])\big)\Big) \in \R^{C' \times Y \times X},
   \label{eq:fuse}
 \end{equation}
 with $C' = 256$. Because the concatenation order is fixed, $\psi$ can weight each camera individually.
 
-\paragraph{Decoder and heads.} A convolutional decoder with ResNet-18 stages and upsampling skip connections
-processes $B$. Three heads predict a centre heatmap $\Hhat \in [0,1]^{Y \times X}$, a sub-cell offset
-$\Ohat \in \R^{2 \times Y \times X}$ that recovers the quantisation residual of each cell, and a tracking offset
-$\Dhat \in \R^{2 \times Y \times X}$ from each pedestrian's current position to its position at $t-1$. An auxiliary
-head on the camera features predicts a per-view person heatmap $\Hhat^{\mathrm{img}}_v$, which guides the features
-before they are lifted~\cite{teepe2024lifting}.
+\paragraph{Temporal block.} Two convolutions combine $B$ with the BEV map of the previous frame. In all our
+configurations the temporal memory is disabled, so the block receives $B$ in both inputs.
+
+\paragraph{BEV decoder.} An encoder--decoder with ResNet-18 stages processes the BEV map. A $7 \times 7$ stride-2
+convolution and three residual stages downsample it by a factor of 8, and three bilinear upsampling stages with skip
+connections restore the full $120 \times 360$ resolution.
+
+\paragraph{Heads.} Each head is a $3 \times 3$ convolution with 128 channels, instance normalisation and a ReLU,
+followed by a $1 \times 1$ convolution. The centre head predicts the heatmap $\Hhat \in [0,1]^{Y \times X}$; its bias
+is initialised to $-2.19$, a prior probability of 0.1. The offset head predicts four channels: the sub-cell offset
+$\Ohat \in \R^{2 \times Y \times X}$, which recovers the quantisation residual of each cell, and the tracking offset
+$\Dhat \in \R^{2 \times Y \times X}$ from each pedestrian's current position to its position at $t-1$. An image head
+of the same form on the camera features predicts a per-view person heatmap $\Hhat^{\mathrm{img}}_v$ at 1/4
+resolution, which guides the features before they are lifted~\cite{teepe2024lifting}.
 
 \subsection{Scene augmentation}
 \label{sec:sa}
@@ -174,8 +189,7 @@ agreement among views before it predicts a pedestrian.
 Eq.~\eqref{eq:fuse} sees a consistent pattern of reliable and unreliable inputs. A random per-camera assignment with
 the same expected number of mixed cameras is a possible alternative; it performed worse in a single-seed pilot run,
 and we therefore use the fixed assignment.
-(iv)~At inference $\mu(b, v) = b$ and $G_b = G$, so the geometry is exact. The method adds no parameters, no
-forward passes and no inference cost.
+(iv)~At inference $\mu(b, v) = b$ and $G_b = G$, so the geometry is exact.
 
 \paragraph{Relation to view-level augmentation and camera dropout.}
 View augmentation~\cite{engilberge2023mvaug} transforms an image and updates its projection so that the view stays
