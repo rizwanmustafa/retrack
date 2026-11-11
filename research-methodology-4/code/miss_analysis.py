@@ -26,7 +26,7 @@ CELL_M = 0.025
 GRID = (1440, 480)  # WILDTRACK grid, x and y in 2.5 cm cells
 FRAME_STEP = 5
 BINS = {
-    'cams': [(1, 1, '1'), (2, 2, '2'), (3, 3, '3'), (4, 4, '4'), (5, 99, '5+')],
+    'cams': [(0, 0, '0'), (1, 1, '1'), (2, 2, '2'), (3, 3, '3'), (4, 4, '4'), (5, 99, '5+')],
     'border_m': [(0, 1, '<1 m'), (1, 1e9, '>=1 m')],
     'nn_m': [(0, 0.75, '<0.75 m'), (0.75, 1.5, '0.75-1.5 m'), (1.5, 1e9, '>=1.5 m')],
 }
@@ -89,6 +89,16 @@ def main():
                     row[f'{key} {name} missed'] = sum(not p['hit'] for p in sub)
                     row[f'{key} {name} total'] = len(sub)
             rows.append(row)
+            # people missed in 5 or more of the 40 test frames: one person can dominate the miss counts
+            per = defaultdict(list)
+            for q in miss:
+                per[q['pid']].append(q)
+            for pid, qs in sorted(per.items(), key=lambda t: -len(t[1])):
+                if len(qs) >= 5:
+                    print(f"  {variant} s{seed}: person {pid} missed in {len(qs)} frames "
+                          f"({qs[0]['frame']}-{qs[-1]['frame']}), cameras {sorted({q['cams'] for q in qs})}, "
+                          f"edge distance {min(q['border_m'] for q in qs):.2f} m, best score {max(q['best'] for q in qs):.2f}",
+                          flush=True)
             print(f"{variant} s{seed}: {row['misses']} misses; by cameras " + ', '.join(
                 f"{n}: {row[f'cams {n} missed']}/{row[f'cams {n} total']}" for _, _, n in BINS['cams']) +
                 f"; near-threshold (0.3-0.5) {row['score_0_3_to_0_5']}; single-frame {row['single_frame']}",
