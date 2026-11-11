@@ -32,4 +32,4 @@ nvidia-smi
 tail -n 5 /content/drive/MyDrive/retrack_results_m2/m4/pipeline.log
 ```
 
-Session 2: the same cell with `RUNS = 'FG0:80085 E0c:80085'`.
+Session 2: the same cell with `RUNS = 'A2xT:80085 FG0:80085'` (SA-VM + temporal history; the gate alone). It also runs the miss analysis (`code/miss_analysis.py`).

@@ -45,7 +45,8 @@ NEW_NAMES = {'M2': 'M2 (proposed): scene aug + VGF + rays + diversity prior',
              'CD': 'CD: scene aug + camera dropout (control)',
              'FGx': 'FGx: SA-VM + foreground-gated lifting (methodology 4)',
              'FG0': 'FG0: foreground-gated lifting alone (methodology 4)',
-             'E0c': 'E0c: retrained TrackTacular, current code'}
+             'E0c': 'E0c: retrained TrackTacular, current code',
+             'A2xT': 'A2xT: SA-VM + temporal BEV history (methodology 4)'}
 ROBUST_NAMES = {'attempt1_E0': 'attempt 1: retrained TrackTacular (E0)', 'attempt1_A2': 'attempt 1: SA-VM (A2)'}
 CONDITIONS = ['clean', 'tta', 'calib_low', 'calib_high', 'drop1', 'drop2']
 
@@ -178,7 +179,8 @@ def main():
                     ('RVM', 'CD', 'H11: random view mixing vs camera dropout'),
                     ('FGx', 'A2x', 'M4-H1: foreground gating on top of SA-VM'),
                     ('FG0', 'E0c', 'M4-H2: foreground gating on the plain baseline'),
-                    ('A2x', 'E0c', 'SA-VM vs baseline, both in the current code')):
+                    ('A2x', 'E0c', 'SA-VM vs baseline, both in the current code'),
+                    ('A2xT', 'A2x', 'M4-T1: temporal history on top of SA-VM')):
         for seed in sorted(set(prim[prim.variant == a].seed) & set(prim[prim.variant == b].seed)):
             ra = prim[(prim.variant == a) & (prim.seed == seed)].iloc[0]
             rb = prim[(prim.variant == b) & (prim.seed == seed)].iloc[0]

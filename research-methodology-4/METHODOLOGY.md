@@ -82,8 +82,8 @@ What each outcome means:
 | session | `RUNS` | answers |
 |---|---|---|
 | 1 | `A2x:80085 FGx:80085` | F0, F1, F4 |
-| 2 | `FG0:80085 E0c:80085` | F2, F3 |
-| 3–4 | `FGx:2 A2x:2`, then `FGx:1 A2x:1` | F1 at 3 seeds, only if F1 passed screening |
+| 2 | `A2xT:80085 FG0:80085` | T1 (§7); F2 and F3 against attempt-1 E0 s80085 until E0c is run |
+| 3–4 | `FGx:2 A2x:2`, then `FGx:1 A2x:1`, and the same for A2xT | F1 / T1 at 3 seeds, only if they passed screening |
 
 Each session is about 75 minutes on an A100: about 3 minutes for the background (first session only), about 5 minutes
 of preflight, 2 × 31–32 minutes of training, about 2 minutes of evaluation and about 3 minutes of robustness.
@@ -99,3 +99,46 @@ of preflight, 2 × 31–32 minutes of training, about 2 minutes of evaluation an
   check, and a wider literature search is needed before any claim.
 - The background is computed from training frames of the same scene as the test frames. This is the classic setting
   of [P17], but it would not transfer to a new camera without its own background.
+
+## 7. Where the misses are (attempt-1 detections, 2026-11-11) and amendment 1
+
+SA-VM trades false detections for misses (methodology 3, §10.3). To see which misses, we re-matched attempt 1's
+saved test detections (`for_claude.zip`, `eval/*/detections_test.pt`) at threshold 0.5 and 0.5 m, as the protocol.
+Numbers are sums over seeds 1, 2 and 80085; 952 people per seed, 2,856 in total.
+
+| | E0 (retrained) | A3 (+ temporal history) | A2 (SA-VM) |
+|---|---|---|---|
+| misses | 136 | 108 | 161 |
+| false detections | 117 | 122 | 71 |
+| miss rate, within 1 m of the area's edge (219 people) | 21.0 % | 24.2 % | 20.1 % |
+| miss rate, interior (2,637 people) | 3.4 % | 2.1 % | 4.4 % |
+| miss rate, nearest person closer than 0.75 m (765 people) | 6.0 % | 2.5 % | 7.6 % |
+| missed with a detection scoring 0.3–0.5 within 0.5 m | 60 | 53 | 94 |
+| missed with nothing above 0.1 within 0.5 m | 44 | 38 | 35 |
+| single-frame misses (found in both neighbouring frames) | 53 | 46 | 53 |
+
+What this shows:
+
+- **SA-VM's extra misses are people it sees but under-scores.** Against E0 it has 25 more misses. It has 34 more
+  near-threshold misses (score 0.3–0.5), 27 more interior misses and 12 more crowded misses. Lowering the threshold is
+  not admissible, and on test frames it gained only 0.2 MODA because false detections come back.
+- **Temporal history fixes crowded and interior misses.** A3 has 19 crowded misses against 46 for E0, and 55 interior
+  misses against 90.
+- **About a third of every model's misses are at the edge of the area** (44–53 of them), at a similar rate for all
+  three. SA-VM does not cause these, and neither candidate targets them.
+
+The camera-count split needs the annotations, so it runs on Colab (`code/miss_analysis.py`, step 6 of the notebook).
+
+**Amendment 1: A2xT = SA-VM + temporal BEV history** (`--model.use_temporal_cache true`, attempt 1's A3).
+
+| ID | Hypothesis | Comparison | Passes screening if |
+|---|---|---|---|
+| T1 | Temporal history removes SA-VM's extra misses without bringing back its false detections | A2xT − A2x, seed 80085 | misses lower by 5 or more, false detections up by fewer than that, MODA up |
+
+Risk: attempt 1's all-in-one model (A1 occluders + A2 + A3) did not combine cleanly: 46, 63 and 64 misses over its 3
+seeds. A2xT leaves out the occluders, which is the untested combination. Note: for temporal models, the mirror-TTA
+condition of robust_eval is not valid, because the mirrored passes overwrite the temporal cache. TTA was dropped in
+methodology 3 anyway.
+
+Next candidate if T1 fails (not implemented): switch view mixing off for the last epochs, so that the heatmap is
+recalibrated on correct geometry. This targets the near-threshold misses directly.

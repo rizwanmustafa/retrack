@@ -25,6 +25,7 @@ Research methodology 4 (research-methodology-4/METHODOLOGY.md, needs --fg_backgr
   FGx  SA-VM (A2x) + foreground-gated lifting
   FG0  foreground-gated lifting alone, no scene augmentation, no mixing
   E0c  retrained TrackTacular in the current code (no scene augmentation, no mixing)
+  A2xT SA-VM (A2x) + temporal BEV history (attempt 1's A3), against SA-VM's extra misses
 """
 import argparse
 import glob
@@ -40,7 +41,7 @@ import zipfile
 HERE = osp.dirname(osp.abspath(__file__))
 WORLDTRACK = osp.normpath(osp.join(HERE, '..', '..', 'WorldTrack'))
 
-_V = dict(scene=True, vgf=False, ray=False, prior='diversity', mix=False, mixr=0.0, cdrop=0.0, fg=False)
+_V = dict(scene=True, vgf=False, ray=False, prior='diversity', mix=False, mixr=0.0, cdrop=0.0, fg=False, temp=False)
 VARIANTS = {
     'M2': dict(_V, vgf=True, ray=True),
     'M2c': dict(_V, vgf=True, ray=True, prior='coverage'),
@@ -54,6 +55,7 @@ VARIANTS = {
     'FGx': dict(_V, mix=True, fg=True),
     'FG0': dict(_V, scene=False, fg=True),
     'E0c': dict(_V, scene=False),
+    'A2xT': dict(_V, mix=True, temp=True),
 }
 ATTEMPT1 = {'base': 'E0', 'A2': 'A2'}  # attempt-1 runs evaluated for robustness: folder variant -> report variant
 
@@ -67,7 +69,7 @@ def train_cmd(variant, seed, run_dir, data_dir, args, epochs, extra=()):
     return [sys.executable, 'world_track.py', 'fit',
             '-c', 'configs/t_retrack.yml', '-c', 'configs/d_wildtrack.yml', '-c', 'configs/m_segnet.yml',
             '-c', 'configs/v_concat.yml',
-            '--model.use_temporal_cache', 'false',
+            '--model.use_temporal_cache', str(v['temp']).lower(),
             '--model.vgf', str(v['vgf']).lower(),
             '--model.ray_cond', str(v['ray']).lower(),
             '--model.vgf_prior', v['prior'],
