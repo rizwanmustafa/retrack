@@ -5,7 +5,9 @@ and cited as **[Pxx] + table/section**. Our own numbers come from the run report
 (`../research-methodology-2/METHODOLOGY.md` §8–10). Design choices that are not from a paper are labelled **our
 choice**.*
 
-> **Status, 2026-11-11.** Implemented and not yet run. Session 1 is `RUNS='A2x:80085 FGx:80085'` (see `RUN.md`).
+> **Status, 2026-11-11.** Session 1 done (§8): the masks are correct (F0 passes), but the gate makes SA-VM worse (F1
+> fails: −2.10 MOTA, 18 more misses, no fewer false detections). FGx is not taken to more seeds. Session 2
+> (`A2xT:80085 FG0:80085`) answers T1 and F2/F3.
 
 ## 1. Idea
 
@@ -142,3 +144,43 @@ methodology 3 anyway.
 
 Next candidate if T1 fails (not implemented): switch view mixing off for the last epochs, so that the heatmap is
 recalibrated on correct geometry. This targets the near-threshold misses directly.
+
+## 8. Session 1 results (2026-11-11)
+
+Seed 80085, protocol thr0.5|tt. Source: `m4/REPORT.md`, `m4/fg_check.csv`, and the saved test detections re-matched as
+in §7.
+
+**A2x reproduces SA-VM in the current code.** Against attempt-1 A2 s80085: MODA +0.32, MOTA +0.00, IDF1 +0.02
+(92.33 / 92.65 / 95.44). It is the reference for every comparison below.
+
+**F0 passes.** Mean mask inside person boxes is 3.6–7.5× the mean outside, on every camera (inside 0.69–0.85,
+outside 0.11–0.22). 15–29 % of each image is marked foreground. The preview shows that shadows and faint "ghosts" of
+people who stood still during the training frames are also marked.
+
+**F1 fails.**
+
+| | A2x | FGx | FGx − A2x |
+|---|---|---|---|
+| MODA | 92.33 | 90.34 | −2.00 |
+| MOTA | 92.65 | 90.55 | −2.10 |
+| IDF1 | 95.44 | 94.30 | −1.14 |
+| misses | 47 | 65 | +18 |
+| false detections | 26 | 27 | +1 |
+| misses with a detection scoring 0.3–0.5 within 0.5 m | 24 | 41 | +17 |
+| misses within 1 m of the edge (73 people) | 14 | 18 | +4 |
+| misses, interior (879 people) | 33 | 47 | +14 |
+| single-frame misses | 17 | 24 | +7 |
+
+The gate removes no false detections on top of SA-VM. It lowers the score of real people: almost all of the extra
+misses (17 of 18) are found by FGx, but scored between 0.3 and 0.5. This is the same failure as SA-VM's own extra
+misses (§7), made worse.
+
+**F4: the gate costs robustness under small calibration noise only.** FGx − A2x: clean −2.00 MODA, calib_low −3.05,
+calib_high +0.85, drop1 −1.38, drop2 −1.18. With camera drop, the loss is no larger than the clean loss. Under small
+calibration noise it is about 1 point larger, as predicted in §4. All of this is one seed.
+
+**Decision.** By the rule of §4, FGx is not run on seeds 2 and 1. FG0 (session 2) still decides how the negative
+result is reported: if the gate alone also removes no false detections (F2 fails), TrackTacular's image heads already
+learn where people are, and the gate is redundant in general, not only on top of SA-VM.
+
+Not measured: the learned floor a. It is in the FGx checkpoint (`fg_floor`), which is not in the bundle.
