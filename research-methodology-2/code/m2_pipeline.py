@@ -21,6 +21,10 @@ Variants (see METHODOLOGY.md):
   A2x  SA-VM: scene augmentation + view mixing of cameras 1, 3, 5 (= attempt-1 A2, on purpose)
   RVM  scene augmentation + random view mixing (each camera with probability 3/7)  (methodology 3)
   CD   scene augmentation + camera dropout instead of view mixing                 (control: is mixing just dropout?)
+Research methodology 4 (research-methodology-4/METHODOLOGY.md, needs --fg_background):
+  FGx  SA-VM (A2x) + foreground-gated lifting
+  FG0  foreground-gated lifting alone, no scene augmentation, no mixing
+  E0c  retrained TrackTacular in the current code (no scene augmentation, no mixing)
 """
 import argparse
 import glob
@@ -36,7 +40,7 @@ import zipfile
 HERE = osp.dirname(osp.abspath(__file__))
 WORLDTRACK = osp.normpath(osp.join(HERE, '..', '..', 'WorldTrack'))
 
-_V = dict(scene=True, vgf=False, ray=False, prior='diversity', mix=False, mixr=0.0, cdrop=0.0)
+_V = dict(scene=True, vgf=False, ray=False, prior='diversity', mix=False, mixr=0.0, cdrop=0.0, fg=False)
 VARIANTS = {
     'M2': dict(_V, vgf=True, ray=True),
     'M2c': dict(_V, vgf=True, ray=True, prior='coverage'),
@@ -47,6 +51,9 @@ VARIANTS = {
     'RVM': dict(_V, mixr=round(3 / 7, 4)),
     # dropout matched to view mixing: 2/3 of the samples lose 1-3 cameras, as 2/3 of the batches misplace 3 cameras
     'CD': dict(_V, cdrop=0.67),
+    'FGx': dict(_V, mix=True, fg=True),
+    'FG0': dict(_V, scene=False, fg=True),
+    'E0c': dict(_V, scene=False),
 }
 ATTEMPT1 = {'base': 'E0', 'A2': 'A2'}  # attempt-1 runs evaluated for robustness: folder variant -> report variant
 
@@ -79,7 +86,8 @@ def train_cmd(variant, seed, run_dir, data_dir, args, epochs, extra=()):
             '--trainer.max_epochs', str(epochs),
             '--trainer.precision', args.precision,
             '--trainer.default_root_dir', run_dir,
-            '--seed_everything', str(seed)] + list(extra) + shlex.split(args.train_args)
+            '--seed_everything', str(seed)] + (['--model.fg_background', args.fg_background] if v['fg'] else []) \
+        + list(extra) + shlex.split(args.train_args)
 
 
 def last_ckpt(run_dir):
@@ -210,7 +218,9 @@ def bundle(root):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--results', required=True, help='parent folder (Google Drive); outputs go to <results>/m2')
+    p.add_argument('--results', required=True, help='parent folder (Google Drive); outputs go to <results>/<subdir>')
+    p.add_argument('--subdir', default='m2', help='m4 for research methodology 4')
+    p.add_argument('--fg_background', default='', help='fg_background.npz (research-methodology-4), for FG* variants')
     p.add_argument('--data_root', default='/content/data')
     p.add_argument('--runs', nargs='+', default=['M2:80085'],
                    help='variant:seed pairs. 80085 is the seed attempt 1 used for its first baseline run')
@@ -233,13 +243,15 @@ def main():
         variant, seed = r.split(':')
         assert variant in VARIANTS, f'unknown variant {variant}, expected one of {list(VARIANTS)}'
         jobs.append((variant, int(seed)))
-    root = osp.join(args.results, 'm2')
+        assert not VARIANTS[variant]['fg'] or osp.exists(args.fg_background), \
+            f'{variant} needs --fg_background (research-methodology-4/code/fg_background.py)'
+    root = osp.join(args.results, args.subdir)
     data_dir = osp.join(args.data_root, 'Wildtrack')
     os.makedirs(root, exist_ok=True)
     commit = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=WORLDTRACK, capture_output=True, text=True).stdout.strip()
     json.dump(dict(vars(args), git_commit=commit, time=time.strftime('%Y-%m-%d %H:%M:%S')),
               open(osp.join(root, f'env_{time.strftime("%Y%m%d_%H%M%S")}.json'), 'w'), indent=1)
-    log(f'Research methodology 2: {len(jobs)} training(s) {args.runs}, parallel={args.parallel}, commit {commit[:7]}')
+    log(f'Research methodology pipeline ({args.subdir}): {len(jobs)} training(s) {args.runs}, parallel={args.parallel}, commit {commit[:7]}')
 
     if not args.skip_preflight:
         preflight(sorted({v for v, _ in jobs}), root, data_dir, args)

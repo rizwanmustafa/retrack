@@ -42,7 +42,10 @@ NEW_NAMES = {'M2': 'M2 (proposed): scene aug + VGF + rays + diversity prior',
              'M2cx': 'M2cx: M2c + view mixing (old batch order on purpose)',
              'A2x': 'A2x: SA-VM, scene aug + view mixing of cameras 1,3,5 (deliberate)',
              'RVM': 'RVM: scene aug + random view mixing (p = 3/7 per camera)',
-             'CD': 'CD: scene aug + camera dropout (control)'}
+             'CD': 'CD: scene aug + camera dropout (control)',
+             'FGx': 'FGx: SA-VM + foreground-gated lifting (methodology 4)',
+             'FG0': 'FG0: foreground-gated lifting alone (methodology 4)',
+             'E0c': 'E0c: retrained TrackTacular, current code'}
 ROBUST_NAMES = {'attempt1_E0': 'attempt 1: retrained TrackTacular (E0)', 'attempt1_A2': 'attempt 1: SA-VM (A2)'}
 CONDITIONS = ['clean', 'tta', 'calib_low', 'calib_high', 'drop1', 'drop2']
 
@@ -172,7 +175,10 @@ def main():
                     ('RVM', 'A2f', 'random view mixing vs none'),
                     ('CD', 'A2f', 'camera dropout vs none'),
                     ('A2x', 'CD', 'H11: view mixing vs camera dropout'),
-                    ('RVM', 'CD', 'H11: random view mixing vs camera dropout')):
+                    ('RVM', 'CD', 'H11: random view mixing vs camera dropout'),
+                    ('FGx', 'A2x', 'M4-H1: foreground gating on top of SA-VM'),
+                    ('FG0', 'E0c', 'M4-H2: foreground gating on the plain baseline'),
+                    ('A2x', 'E0c', 'SA-VM vs baseline, both in the current code')):
         for seed in sorted(set(prim[prim.variant == a].seed) & set(prim[prim.variant == b].seed)):
             ra = prim[(prim.variant == a) & (prim.seed == seed)].iloc[0]
             rb = prim[(prim.variant == b) & (prim.seed == seed)].iloc[0]

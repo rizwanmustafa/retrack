@@ -9,6 +9,7 @@ from kornia.geometry.transform.imgwarp import warp_perspective
 from models.encoder import Encoder_res101, Encoder_res50, Encoder_res18, Encoder_eff, Encoder_swin_t
 from models.decoder import Decoder
 from models.fusion import FUSION_MODES, CameraScorer, fuse_views, coverage_map, view_diversity
+from models.foreground import load_background, foreground_mask
 
 VGF_PRIORS = ('coverage', 'diversity')
 
@@ -30,7 +31,8 @@ class Segnet(nn.Module):
                  ray_cond=False,
                  vgf_prior='diversity',
                  view_mix=False,
-                 view_mix_random=0.0):
+                 view_mix_random=0.0,
+                 fg_background=None):
         """
         Research methodology 2 (research-methodology-2/METHODOLOGY.md), all off by default:
         vgf:       volumetric-guided fusion of this (volumetric) BEV feature with a homography-projected one, GRACE Eq. 3-5
@@ -43,6 +45,11 @@ class Segnet(nn.Module):
                    Attempt 1's A2 trained this way and tracked better than the fixed A2f (research-methodology-2)
         view_mix_random: training only. Random view mixing: each camera of each sample is independently lifted in the
                    partner sample's reference frame with this probability (3/7 matches view_mix's three cameras)
+        Research methodology 4 (research-methodology-4/METHODOLOGY.md), off by default:
+        fg_background: .npz written by research-methodology-4/code/fg_background.py. The image features that are
+                   lifted to the voxel grid are gated by a background-subtraction foreground mask m:
+                   f' = f (a + (1 - a) m), a = sigmoid(fg_floor) learned, starting at 0.5. The image heads keep the
+                   ungated features. The background is a buffer, so checkpoints carry it.
         """
         super(Segnet, self).__init__()
         assert (encoder_type in ['res101', 'res50', 'effb0', 'effb4', 'res18', 'vgg11', 'swin_t'])
@@ -67,6 +74,14 @@ class Segnet(nn.Module):
         assert not (view_mix and view_mix_random > 0), 'choose one of view_mix (fixed cameras) and view_mix_random'
         self.view_mix = view_mix
         self.view_mix_random = view_mix_random
+        self.fg = fg_background is not None
+        if self.fg:
+            assert not rand_flip, 'the foreground mask is not flipped with the image'
+            bg, K0, size0 = load_background(fg_background)
+            self.register_buffer('fg_bg', torch.as_tensor(bg, dtype=torch.float32) / 255)  # S,3,h,w
+            self.register_buffer('fg_K', torch.as_tensor(K0, dtype=torch.float32))  # S,3,3
+            self.register_buffer('fg_size', torch.as_tensor(size0, dtype=torch.float32))  # W0, H0
+            self.fg_floor = nn.Parameter(torch.tensor(0.0))
 
         self.register_buffer('mean', torch.as_tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1), persistent=False)
         self.register_buffer('std', torch.as_tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1), persistent=False)
@@ -184,6 +199,7 @@ class Segnet(nn.Module):
 
         # rgb encoder
         device = rgb_cams_.device
+        rgb_raw_ = rgb_cams_
         rgb_cams_ = (rgb_cams_ - self.mean.to(device)) / self.std.to(device)
         if self.rand_flip:
             B0, _, _, _ = rgb_cams_.shape
@@ -200,9 +216,15 @@ class Segnet(nn.Module):
         Y, Z, X = self.Y, self.Z, self.X
         featpix_T_cams_ = utils.geom.scale_intrinsics(pix_T_cams_, sx, sy)
 
+        feat_lift_ = feat_cams_
+        if self.fg:
+            fg = foreground_mask(rgb_raw_, pix_T_cams_, self.fg_bg, self.fg_K, self.fg_size, (Hf, Wf))
+            floor = torch.sigmoid(self.fg_floor)
+            feat_lift_ = feat_cams_ * (floor + (1 - floor) * fg.to(feat_cams_.dtype))
+
         # unproject image feature to 3d grid
         feat_mems_, valid_mems_ = vox_util.unproject_image_to_mem(
-            feat_cams_,  # B*S,128,H/8,W/8
+            feat_lift_,  # B*S,128,H/8,W/8
             utils.basic.matmul2(featpix_T_cams_, cams_T_ref_),  # featpix_T_ref  B*S,4,4
             cams_T_ref_, Y, Z, X,
             xyz_refA=None, z_sign=self.z_sign, return_valid=True)
