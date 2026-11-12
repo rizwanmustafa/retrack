@@ -5,9 +5,11 @@ and cited as **[Pxx] + table/section**. Our own numbers come from the run report
 (`../research-methodology-2/METHODOLOGY.md` §8–10). Design choices that are not from a paper are labelled **our
 choice**.*
 
-> **Status, 2026-11-11.** Session 1 done (§8): the masks are correct (F0 passes), but the gate makes SA-VM worse (F1
-> fails: −2.10 MOTA, 18 more misses, no fewer false detections). FGx is not taken to more seeds. Session 2
-> (`A2xT:80085 FG0:80085`) answers T1 and F2/F3.
+> **Status, 2026-11-12.** Sessions 1 and 2 done (§8, §9). Neither add-on helps SA-VM. The gate lowers the scores of
+> real people (F1 fails). Temporal history brings back the false detections that SA-VM removes (T1 fails). The gate
+> alone removes only 5 false detections (F2 fails). SA-VM's gain is larger than the gate's (F3 passes). SA-VM (A2x)
+> stays the strongest model. Session 3 (`CD:80085 E0c:80085`) runs the camera-dropout control and the current-code
+> baseline that the SA-VM paper needs.
 
 ## 1. Idea
 
@@ -85,7 +87,8 @@ What each outcome means:
 |---|---|---|
 | 1 | `A2x:80085 FGx:80085` | F0, F1, F4 |
 | 2 | `A2xT:80085 FG0:80085` | T1 (§7); F2 and F3 against attempt-1 E0 s80085 until E0c is run |
-| 3–4 | `FGx:2 A2x:2`, then `FGx:1 A2x:1`, and the same for A2xT | F1 / T1 at 3 seeds, only if they passed screening |
+| 3–4 | `FGx:2 A2x:2`, then `FGx:1 A2x:1`, and the same for A2xT | F1 / T1 at 3 seeds, only if they passed screening (neither did) |
+| 3 (new) | `CD:80085 E0c:80085` | H11 of methodology 3 (view mixing vs camera dropout); E0c replaces attempt-1 E0 in F2/F3 |
 
 Each session is about 75 minutes on an A100: about 3 minutes for the background (first session only), about 5 minutes
 of preflight, 2 × 31–32 minutes of training, about 2 minutes of evaluation and about 3 minutes of robustness.
@@ -184,3 +187,57 @@ result is reported: if the gate alone also removes no false detections (F2 fails
 learn where people are, and the gate is redundant in general, not only on top of SA-VM.
 
 Not measured: the learned floor a. It is in the FGx checkpoint (`fg_floor`), which is not in the bundle.
+
+## 9. Session 2 results (2026-11-12)
+
+Seed 80085, protocol thr0.5|tt. Source: `m4/REPORT.md` and the saved test detections re-matched as in §7. E0 is
+attempt-1 E0 s80085 (older code), because E0c has not been run.
+
+| | E0 | FG0 | A2x | A2xT |
+|---|---|---|---|---|
+| MODA | 90.76 | 91.49 | 92.33 | 91.18 |
+| MOTA | 89.08 | 90.13 | 92.65 | 90.34 |
+| IDF1 | 93.40 | 94.54 | 95.44 | 94.26 |
+| misses | 47 | 45 | 47 | 50 |
+| false detections | 41 | 36 | 26 | 34 |
+| false detections 2 m or more from any person | 19 | 14 | 8 | 18 |
+| tracking false positives | 51 | 45 | 23 | 41 |
+| misses within 1 m of the edge (73 people) | 14 | 14 | 14 | 22 |
+| misses, interior (879 people) | 33 | 31 | 33 | 28 |
+| misses with a detection scoring 0.3–0.5 within 0.5 m | 19 | 25 | 24 | 26 |
+| single-frame misses | 14 | 14 | 17 | 23 |
+
+E0's metrics are from attempt 1's `report/all_cells.csv` (`base_test_s80085`, thr0.5|tt).
+
+**T1 fails.** A2xT − A2x: MODA −1.16, MOTA −2.31, IDF1 −1.18. Misses go up by 3, not down by 5, and false
+detections go up by 8. Temporal history does what §7 predicted in the interior (5 fewer misses), but it adds 8 misses
+at the edge of the area. It also brings back distant false detections, 2 m or more from any person: 18, against 8 for
+A2x and 19 for E0. That is, the false detections that SA-VM removes come back. The tracker turns them into 41
+tracking false positives, against 23. This repeats attempt 1, where the all-in-one model did not combine cleanly.
+
+**F2 fails.** FG0 − E0: false detections −5 (41 → 36), not −10. The 5 are distant false detections (19 → 14). FG0
+scores +0.74 MODA, +1.05 MOTA and +1.14 IDF1 over E0. That is inside attempt 1's seed spread of 0.3–1.5 points, and
+the baseline is from older code.
+
+**F3 passes.** Against E0, A2x gains +3.57 MOTA and removes 15 false detections. FG0 gains +1.05 MOTA and removes 5.
+SA-VM's gain is not explained by background suppression.
+
+So, by the table of §4: F1 and F2 fail. TrackTacular's per-view image heads already learn where people are, and a
+background-subtraction gate adds little to them, alone or on top of SA-VM.
+
+**Robustness (one seed, MODA).** A2xT − A2x: calib_low −6.97, calib_high −6.93, drop1 −0.36, drop2 −0.10. Temporal
+history makes calibration noise worse, because a misplaced view is carried into the next frame through the cache.
+FG0 against A2x: calib_low −5.11, calib_high +1.79, drop1 +0.64, drop2 +1.35. FG0's TTA collapse (31.30) is expected:
+mirror TTA is not valid for a model trained without scene flips.
+
+**Not measured: the camera-count split.** The notebook wrote the bundle in step 5, before the miss analysis of step 6,
+so `misses.csv` is on Drive (`m4/misses.csv`) but not in the zip. The notebook now adds `misses.csv` and `misses.log`
+to the bundle after step 6.
+
+**Decision.** Neither A2xT nor FG0 goes to more seeds. Methodology 4 ends with a negative result: two cheap add-ons,
+neither of which helps SA-VM, with the reason for each. Session 3 is `CD:80085 E0c:80085`:
+
+- CD is the camera-dropout control of methodology 3 (H11), which the SA-VM paper's Table 2 lists and which has never
+  been run.
+- E0c is TrackTacular retrained in the current code. It replaces attempt-1 E0 as the baseline.
+
