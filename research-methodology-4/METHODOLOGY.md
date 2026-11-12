@@ -55,7 +55,7 @@ works without changes, and checkpoints stay comparable with the SA-VM runs.
 | A2x | yes | fixed | no | SA-VM rebuilt in the current code (reference) |
 | **FGx** | yes | fixed | yes | **proposed** |
 | FG0 | no | no | yes | gate alone |
-| E0c | no | no | no | retrained TrackTacular, current code |
+| E0c | no | no | no | baseline: the same network trained without scene flips or view mixing, current code |
 
 ## 4. Hypotheses and decision rules (fixed before the runs)
 
@@ -79,7 +79,7 @@ What each outcome means:
 |---|---|
 | F1 passes | C5 of the proposal: a cheap component that adds to SA-VM |
 | F1 fails, F2 passes and F3 fails | SA-VM's gain is mostly background suppression, which a reviewer would ask about |
-| F1 and F2 fail | TrackTacular's per-view image heads already learn where people are; the gate is redundant |
+| F1 and F2 fail | the network's per-view image heads may already learn where people are; the gate is redundant |
 
 ## 5. Schedule
 
@@ -183,8 +183,8 @@ calib_high +0.85, drop1 −1.38, drop2 −1.18. With camera drop, the loss is no
 calibration noise it is about 1 point larger, as predicted in §4. All of this is one seed.
 
 **Decision.** By the rule of §4, FGx is not run on seeds 2 and 1. FG0 (session 2) still decides how the negative
-result is reported: if the gate alone also removes no false detections (F2 fails), TrackTacular's image heads already
-learn where people are, and the gate is redundant in general, not only on top of SA-VM.
+result is reported: if the gate alone also removes no false detections (F2 fails), the network's per-view image heads may
+already learn where people are, and the gate is redundant in general, not only on top of SA-VM.
 
 Not measured: the learned floor a. It is in the FGx checkpoint (`fg_floor`), which is not in the bundle.
 
@@ -222,7 +222,7 @@ the baseline is from older code.
 **F3 passes.** Against E0, A2x gains +3.57 MOTA and removes 15 false detections. FG0 gains +1.05 MOTA and removes 5.
 SA-VM's gain is not explained by background suppression.
 
-So, by the table of §4: F1 and F2 fail. TrackTacular's per-view image heads already learn where people are, and a
+So, by the table of §4: F1 and F2 fail. One explanation, not measured here: the network's per-view image heads already learn where people are, and a
 background-subtraction gate adds little to them, alone or on top of SA-VM.
 
 **Robustness (one seed, MODA).** A2xT − A2x: calib_low −6.97, calib_high −6.93, drop1 −0.36, drop2 −0.10. Temporal
@@ -239,5 +239,6 @@ neither of which helps SA-VM, with the reason for each. Session 3 is `CD:80085 E
 
 - CD is the camera-dropout control of methodology 3 (H11), which the SA-VM paper's Table 2 lists and which has never
   been run.
-- E0c is TrackTacular retrained in the current code. It replaces attempt-1 E0 as the baseline.
+- E0c is the baseline (the same network, trained without scene flips or view mixing) in the current code. It
+  replaces attempt-1 E0.
 

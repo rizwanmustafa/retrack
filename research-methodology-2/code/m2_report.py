@@ -31,7 +31,7 @@ PUBLISHED = [
     dict(name='TrackTacular retrained by GRACE authors', source='[P02] Tab. 1',
          moda=88.50, modp=78.56, precision=97.42, recall=91.39, idf1=94.00, mota=89.71, motp=84.90),
 ]
-BASELINE_NAMES = {'base': 'attempt 1: retrained TrackTacular (E0)',
+BASELINE_NAMES = {'base': 'attempt 1: baseline, no scene aug or view mixing (E0)',
                   'A2': 'attempt 1: + scene aug (batch-order bug)',
                   'A3': 'attempt 1: + temporal history',
                   'A1A2A3': 'attempt 1: A1+A2+A3 (batch-order bug)'}
@@ -45,9 +45,9 @@ NEW_NAMES = {'M2': 'M2 (proposed): scene aug + VGF + rays + diversity prior',
              'CD': 'CD: scene aug + camera dropout (control)',
              'FGx': 'FGx: SA-VM + foreground-gated lifting (methodology 4)',
              'FG0': 'FG0: foreground-gated lifting alone (methodology 4)',
-             'E0c': 'E0c: retrained TrackTacular, current code',
+             'E0c': 'E0c: baseline, no scene aug or view mixing, current code',
              'A2xT': 'A2xT: SA-VM + temporal BEV history (methodology 4)'}
-ROBUST_NAMES = {'attempt1_E0': 'attempt 1: retrained TrackTacular (E0)', 'attempt1_A2': 'attempt 1: SA-VM (A2)'}
+ROBUST_NAMES = {'attempt1_E0': 'attempt 1: baseline, no scene aug or view mixing (E0)', 'attempt1_A2': 'attempt 1: SA-VM (A2)'}
 CONDITIONS = ['clean', 'tta', 'calib_low', 'calib_high', 'drop1', 'drop2']
 
 
@@ -130,7 +130,7 @@ def main():
              'Method: `research-methodology-2/METHODOLOGY.md`. All numbers in %, WILDTRACK test frames 360–399, '
              '952 ground-truth detections, so one error moves a metric by about 0.105 points.', '']
 
-    for cell, title in (('thr0.5|tt', 'Primary protocol: threshold 0.5, TrackTacular tracker, nothing tuned on test'),
+    for cell, title in (('thr0.5|tt', 'Primary protocol: threshold 0.5, Kalman + Hungarian tracker, nothing tuned on test'),
                         ('thr*|tt', 'Upper bound: detection threshold tuned on the test frames (oracle)')):
         rows = [dict(configuration=r['name'], kind=f'published {r["source"]}', seeds=1, **{
             'seed list': '-', **{m: fmt(r[m]) for m in METRICS}}) for r in PUBLISHED] if cell == 'thr0.5|tt' else []
