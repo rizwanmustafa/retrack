@@ -34,6 +34,7 @@ misses, not false positives:
 
 | Model | Clean FP / FN | 1 camera off | 2 cameras off | Small calibration noise |
 |---|---|---|---|---|
+| **E0, plain retrained TrackTacular, 3 seeds** (m2 bundle) | 39.0 / 45.3 | 35.7 / 61.4 | 34.7 / 89.3 | 32.4 / 229.0 |
 | FG0 (closest to B0) | 36 / 45 | 33.6 / 62.6 | 33.0 / 92.7 | 42.0 / 221.3 |
 | A2x (SA-VM) | 26 / 47 | 24.1 / 78.1 | 22.1 / 116.4 | 35.3 / 179.3 |
 | FGx | 27 / 65 | 24.7 / 90.7 | 23.3 / 126.6 | 33.3 / 210.3 |
@@ -41,7 +42,10 @@ misses, not false positives:
 
 False positives stay flat or fall, while misses double. So explaining-away cannot explain the camera-removal loss. At
 most it can remove the clean false positives (26 to 36, worth about 2.7 to 3.8 MODA if every one were a ghost).
-Still to confirm on B0 and MultiviewX with the m5 `metrics.csv`.
+The E0 row confirms this on the plain baseline, on every seed. The same pattern holds for all 9 models in the
+methodology-2 bundle (`for_claude(1).zip`). On clean data most misses are near the threshold: for FG0, 26 of 45 score
+0.3 to 0.5, but lowering the threshold to 0.3 adds about 50 false positives. Still to confirm on MultiviewX, and for 3
+cameras removed, with the m5 `metrics.csv`.
 
 **Proposed architecture: explaining-away fusion.** Person hypotheses compete for pixels. Iterate 2 to 3 times:
 1. Detect people (R2's queries give positions and scores).
