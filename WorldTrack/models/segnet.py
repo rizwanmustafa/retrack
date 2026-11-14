@@ -10,6 +10,9 @@ from models.encoder import Encoder_res101, Encoder_res50, Encoder_res18, Encoder
 from models.decoder import Decoder
 from models.fusion import FUSION_MODES, CameraScorer, fuse_views, coverage_map, view_diversity
 from models.foreground import load_background, foreground_mask
+from models.da3_branch import DA3Backbone, DA3Adapter
+from models.query_decoder import SparseQueryDecoder, ImageCenterHead, ViewSampler, sample_bev
+from models.track_queries import TrackQueryHead
 
 VGF_PRIORS = ('coverage', 'diversity')
 
@@ -32,7 +35,15 @@ class Segnet(nn.Module):
                  vgf_prior='diversity',
                  view_mix=False,
                  view_mix_random=0.0,
-                 fg_background=None):
+                 fg_background=None,
+                 da3=False,
+                 da3_repo='depth-anything/DA3-BASE',
+                 da3_input_hw=(378, 672),
+                 sparse_queries=False,
+                 num_queries=100,
+                 query_layers=3,
+                 query_heights=4,
+                 track_queries=False):
         """
         Research methodology 2 (research-methodology-2/METHODOLOGY.md), all off by default:
         vgf:       volumetric-guided fusion of this (volumetric) BEV feature with a homography-projected one, GRACE Eq. 3-5
@@ -50,6 +61,13 @@ class Segnet(nn.Module):
                    lifted to the voxel grid are gated by a background-subtraction foreground mask m:
                    f' = f (a + (1 - a) m), a = sigmoid(fg_floor) learned, starting at 0.5. The image heads keep the
                    ungated features. The background is a buffer, so checkpoints carry it.
+        Research methodology 5 (research-methodology-5/METHODOLOGY.md), all off by default:
+        da3:            R1, frozen Depth Anything 3 multi-view features added to the ResNet-18 features through a
+                        zero-initialised adapter (models/da3_branch.py)
+        sparse_queries: R2, the dense BEV decoder is replaced by sparse ground-anchored person queries that read the
+                        image features of every camera (models/query_decoder.py)
+        track_queries:  R4, a head that takes the tracker's tracks as input and predicts where each person is now
+                        and whether they are still there (models/track_queries.py)
         """
         super(Segnet, self).__init__()
         assert (encoder_type in ['res101', 'res50', 'effb0', 'effb4', 'res18', 'vgg11', 'swin_t'])
@@ -75,6 +93,11 @@ class Segnet(nn.Module):
         self.view_mix = view_mix
         self.view_mix_random = view_mix_random
         self.fg = fg_background is not None
+        self.da3 = da3
+        self.sparse = sparse_queries
+        self.query_heights = query_heights
+        if da3 or sparse_queries or track_queries:
+            assert not rand_flip, 'research methodology 5 modules do not flip features'
         if self.fg:
             assert not rand_flip, 'the foreground mask is not flipped with the image'
             bg, K0, size0 = load_background(fg_background)
@@ -112,6 +135,11 @@ class Segnet(nn.Module):
         if self.fusion == 'weighted':
             self.cam_scorer = CameraScorer(feat2d_dim, fusion_hidden_dim, spatial_dims=3)
 
+        # R1: frozen DA3 backbone (kept out of the state dict and optimizer, see models/da3_branch.py) + adapter
+        if self.da3:
+            self.da3_backbone = DA3Backbone(da3_repo, da3_input_hw)
+            self.da3_adapter = DA3Adapter(self.da3_backbone.out_channels, out_dim=feat2d_dim)
+
         # Ray conditioning: rho of GRACE Eq. 7, shared by all cameras. Initialised to pass the image features through
         # unchanged (ray weights zero), so training starts from the baseline fusion.
         if self.ray_cond:
@@ -145,12 +173,23 @@ class Segnet(nn.Module):
             nn.Conv2d(latent_dim, latent_dim, kernel_size=1),
         )
 
-        # Decoder
-        self.decoder = Decoder(
-            in_channels=latent_dim,
-            n_classes=num_classes,
-            feat2d=self.feat2d_dim,
-        )
+        # Decoder: dense BEV decoder (baseline) or R2's sparse query decoder
+        if self.sparse:
+            self.query_decoder = SparseQueryDecoder(bev_dim=latent_dim, img_dim=feat2d_dim, num_queries=num_queries,
+                                                    num_layers=query_layers, num_heights=query_heights)
+            self.img_head = ImageCenterHead(feat2d_dim, n_classes=num_classes)
+        else:
+            self.decoder = Decoder(
+                in_channels=latent_dim,
+                n_classes=num_classes,
+                feat2d=self.feat2d_dim,
+            )
+
+        # R4: track queries, reading the features of whichever decoder the model has
+        self.track_head = None
+        if track_queries:
+            feat_dim = latent_dim + (query_heights * (feat2d_dim + 1) if self.sparse else 0)
+            self.track_head = TrackQueryHead(feat_dim)
 
         # Weights
         self.center_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
@@ -159,7 +198,8 @@ class Segnet(nn.Module):
         self.size_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
         self.rot_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
 
-    def forward(self, rgb_cams, pix_T_cams, cams_T_global, vox_util, ref_T_global, prev_bev=None, cam_mask=None):
+    def forward(self, rgb_cams, pix_T_cams, cams_T_global, vox_util, ref_T_global, prev_bev=None, cam_mask=None,
+                track_xy=None, track_valid=None):
         """
         B = batch size, S = number of cameras, C = 3, H = img height, W = img width
         rgb_cams: (B,S,C,H,W)
@@ -168,6 +208,7 @@ class Segnet(nn.Module):
         vox_util: vox util object
         ref_T_global: (B,4,4)
         cam_mask: (B,S) 1 = camera working, 0 = camera switched off; None = all working
+        track_xy, track_valid: (B,T,2) mem positions and (B,T) mask of the input tracks (R4 only)
         rad_occ_mem0:
             - None when use_radar = False, use_lidar = False
             - (B, 1, Z, Y, X) when use_radar = True, use_metaradar = False
@@ -206,6 +247,9 @@ class Segnet(nn.Module):
             self.rgb_flip_index = np.random.choice([0, 1], B0).astype(bool)
             rgb_cams_[self.rgb_flip_index] = torch.flip(rgb_cams_[self.rgb_flip_index], [-1])
         feat_cams_ = self.encoder(rgb_cams_)  # B*S,128,H/8,W/8
+        if self.da3:
+            da3_feats = self.da3_backbone(__u(rgb_cams_), cam_mask)  # B,S,L*C,h,w (frozen, no gradient)
+            feat_cams_ = feat_cams_ + self.da3_adapter(__p(da3_feats), feat_cams_.shape[-2:])
         if self.rand_flip:
             feat_cams_[self.rgb_flip_index] = torch.flip(feat_cams_[self.rgb_flip_index], [-1])
         _, C, Hf, Wf = feat_cams_.shape
@@ -223,9 +267,10 @@ class Segnet(nn.Module):
             feat_lift_ = feat_cams_ * (floor + (1 - floor) * fg.to(feat_cams_.dtype))
 
         # unproject image feature to 3d grid
+        featpix_T_ref_ = utils.basic.matmul2(featpix_T_cams_, cams_T_ref_)  # B*S,4,4
         feat_mems_, valid_mems_ = vox_util.unproject_image_to_mem(
             feat_lift_,  # B*S,128,H/8,W/8
-            utils.basic.matmul2(featpix_T_cams_, cams_T_ref_),  # featpix_T_ref  B*S,4,4
+            featpix_T_ref_,  # featpix_T_ref  B*S,4,4
             cams_T_ref_, Y, Z, X,
             xyz_refA=None, z_sign=self.z_sign, return_valid=True)
         feat_mems = __u(feat_mems_)  # B, S, C, Y, Z, X
@@ -282,9 +327,29 @@ class Segnet(nn.Module):
         feat_bev = self.temporal_bev(feat_bev)
 
         # bev decoder
-        out_dict = self.decoder(feat_bev, feat_cams_)
+        view_sampler = None
+        if self.sparse or self.track_head is not None:
+            view_sampler = ViewSampler(feat_cams_, featpix_T_ref_, cams_T_ref_, cam_mask, vox_util, (Y, Z, X),
+                                       self.z_sign, B, S, self.query_heights)
+        if self.sparse:
+            out_dict = self.query_decoder(feat_bev, view_sampler)
+            out_dict.update({'bev_raw': feat_bev, 'bev_feat': feat_bev, 'img_raw_feat': feat_cams_,
+                             'img_center': self.img_head(feat_cams_)})
+        else:
+            out_dict = self.decoder(feat_bev, feat_cams_)
         if coverage is not None:
             out_dict['coverage'] = coverage
+
+        # R4: where is each input track now, and is it still there?
+        if self.track_head is not None and track_xy is not None and track_xy.shape[1] > 0:
+            bev = out_dict['bev_feat']
+            if self.sparse:
+                sample = lambda xy: torch.cat([sample_bev(bev, xy), view_sampler(xy)], dim=-1)
+            else:
+                sample = lambda xy: sample_bev(bev, xy)
+            if track_valid is None:
+                track_valid = torch.ones(track_xy.shape[:2], dtype=torch.bool, device=track_xy.device)
+            out_dict.update(self.track_head(track_xy, track_valid, sample, Y, X))
 
         return out_dict
 

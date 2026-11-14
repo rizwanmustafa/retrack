@@ -189,6 +189,20 @@ class PedestrianDataset(VisionDataset):
 
         return center, valid_mask, person_ids, offset
 
+    def people_list(self, mem_pts, pids, prefix):
+        """{prefix}_xy (M,2) mem x,y; {prefix}_pid (M,) person id or -1; {prefix}_valid (M,) inside the BEV grid"""
+        M = self.max_objects
+        xy = torch.zeros((M, 2), dtype=torch.float32)
+        pid = torch.full((M,), -1, dtype=torch.long)
+        valid = torch.zeros((M,), dtype=torch.bool)
+        n = min(mem_pts.shape[1], M)
+        if n:
+            p = mem_pts[0, :n, :2].float()
+            xy[:n] = p
+            pid[:n] = pids[:n].long()
+            valid[:n] = (p[:, 0] >= 0) & (p[:, 0] < self.X) & (p[:, 1] >= 0) & (p[:, 1] < self.Y)
+        return {f'{prefix}_xy': xy, f'{prefix}_pid': pid, f'{prefix}_valid': valid}
+
     def get_img_gt(self, img_pts, img_pids, sx, sy, crop):
         H = int(self.data_aug_conf['final_dim'][0] / self.img_downsample)
         W = int(self.data_aug_conf['final_dim'][1] / self.img_downsample)
@@ -436,7 +450,11 @@ class PedestrianDataset(VisionDataset):
             'offset_img': offsets_img,  # S,2,H/8,W/8
             'size_img': sizes_img,  # S,2,H/8,W/8
             'valid_img': valids_img,  # S,1,H/8,W/8
-            'pid_img': pids_img  # S,1,H/8,W/8
+            'pid_img': pids_img,  # S,1,H/8,W/8
         }
+        # research methodology 5 (R2 query assignment, R4 track inputs): people of frames t and t-1 as padded lists
+        # in BEV mem coordinates, in the same (augmented) reference frame as the heatmap targets
+        target.update(self.people_list(mem_pts, world_pids, 'gt'))
+        target.update(self.people_list(mem_pts_pre, world_pid_pre, 'prev'))
 
         return item, target

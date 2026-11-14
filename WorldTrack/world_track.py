@@ -9,6 +9,7 @@ import numpy as np
 
 from models import Segnet, MVDet, Liftnet, Bevformernet
 from models.loss import FocalLoss, compute_rot_loss
+from models.track_queries import build_track_inputs, MAX_MOTION_CELLS
 from tracking.multitracker import build_tracker
 from utils import vox, basic, decode
 from evaluation.mod import modMetricsCalculator
@@ -47,6 +48,18 @@ class WorldTrackModel(pl.LightningModule):
             # Research methodology 4 (segnet only): background .npz -> foreground-gated lifting
             fg_background: Optional[str] = None,
             test_drop_cams: Optional[List[int]] = None,  # cameras switched off at test time
+            # Research methodology 5 (segnet only): R1 DA3 features, R2 sparse queries, R4 track queries
+            da3=False,
+            da3_repo='depth-anything/DA3-BASE',
+            da3_input_hw=(378, 672),
+            sparse_queries=False,
+            num_queries=100,
+            query_layers=3,
+            query_heights=4,
+            query_match_cells=10.0,  # R2: a query is assigned to a person only within 10 BEV cells (1 m)
+            track_queries=False,
+            track_noise=1.5,  # R4 training: jitter (BEV cells) of the previous-frame positions given as tracks
+            track_ghosts=8,  # R4 training: ghost tracks per sample that must be predicted as gone
             # Retrack Stages 2-3: tracker used by `test`
             tracker='baseline',  # 'baseline' | 'byte'
             track_buffer=5,
@@ -99,11 +112,21 @@ class WorldTrackModel(pl.LightningModule):
         fusion_kwargs = dict(fusion=fusion, coverage_map=coverage_map, fusion_hidden_dim=fusion_hidden_dim)
         assert model_name == 'segnet' or not (vgf or ray_cond or view_mix or view_mix_random or fg_background), \
             'vgf / ray_cond / view_mix / fg_background are implemented for segnet only'
+        assert model_name == 'segnet' or not (da3 or sparse_queries or track_queries), \
+            'da3 / sparse_queries / track_queries are implemented for segnet only'
+        self.sparse_queries = sparse_queries
+        self.query_match_cells = query_match_cells
+        self.track_queries = track_queries
+        self.track_noise = track_noise
+        self.track_ghosts = track_ghosts
         if model_name == 'segnet':
             self.model = Segnet(self.Y, self.Z, self.X, num_cameras=num_cameras, feat2d_dim=feat2d_dim,
                                 encoder_type=self.encoder_name, num_classes=num_classes, z_sign=z_sign,
                                 vgf=vgf, ray_cond=ray_cond, vgf_prior=vgf_prior, view_mix=view_mix,
-                                view_mix_random=view_mix_random, fg_background=fg_background, **fusion_kwargs)
+                                view_mix_random=view_mix_random, fg_background=fg_background,
+                                da3=da3, da3_repo=da3_repo, da3_input_hw=tuple(da3_input_hw),
+                                sparse_queries=sparse_queries, num_queries=num_queries, query_layers=query_layers,
+                                query_heights=query_heights, track_queries=track_queries, **fusion_kwargs)
         elif model_name == 'liftnet':
             self.model = Liftnet(self.Y, self.Z, self.X, encoder_type=self.encoder_name, feat2d_dim=feat2d_dim,
                                  DMIN=self.DMIN, DMAX=self.DMAX, D=self.D, num_classes=num_classes, z_sign=z_sign,
@@ -123,7 +146,7 @@ class WorldTrackModel(pl.LightningModule):
         self.vox_util = vox.VoxelUtil(self.Y, self.Z, self.X, scene_centroid=self.scene_centroid, bounds=self.bounds)
         self.save_hyperparameters()
 
-    def forward(self, item):
+    def forward(self, item, track_xy=None, track_valid=None):
         """
         B = batch size, S = number of cameras, C = 3, H = img height, W = img width
         rgb_cams: (B,S,C,H,W)
@@ -140,6 +163,8 @@ class WorldTrackModel(pl.LightningModule):
             prev_bev = self.align_prev_bev(prev_bev, prev_T, scene_T)
         cam_mask = self.get_cam_mask(item)
         kwargs = {} if cam_mask is None else {'cam_mask': cam_mask}
+        if track_xy is not None:
+            kwargs.update(track_xy=track_xy, track_valid=track_valid)
 
         output = self.model(
             rgb_cams=item['img'],
@@ -241,7 +266,102 @@ class WorldTrackModel(pl.LightningModule):
         return torch.nn.functional.grid_sample(prev_bev, grid.to(prev_bev.dtype), mode='bilinear',
                                                padding_mode='zeros', align_corners=True)
 
-    def loss(self, target, output):
+    def loss(self, target, output, track_inputs=None):
+        if 'query_layers' in output:
+            total_loss, loss_dict = self.sparse_loss(target, output)
+        else:
+            total_loss, loss_dict = self.dense_loss(target, output)
+        if track_inputs is not None and 'track_layers' in output:
+            track_loss, track_dict = self.track_loss(track_inputs, output)
+            total_loss = total_loss + track_loss
+            loss_dict.update(track_dict)
+        return total_loss, loss_dict
+
+    def image_center_loss(self, target, output):
+        B, S = target['center_img'].shape[:2]
+        center_img_g = basic.pack_seqdim(target['center_img'], B)
+        return self.center_loss_fn(basic.sigmoid(output['img_center']), center_img_g) / S
+
+    def sparse_loss(self, target, output):
+        """R2: focal loss on the proposal heatmap (same target and uncertainty weighting as the baseline's centre
+        heatmap) + per decoder layer, after one-to-one Hungarian assignment of queries to people: sigmoid focal loss
+        on the scores, smooth L1 on the positions and L1 on the motion to the previous frame."""
+        from scipy.optimize import linear_sum_assignment
+        from torchvision.ops import sigmoid_focal_loss
+        center_loss = self.center_loss_fn(basic.sigmoid(output['proposal_center']), target['center_bev'])
+        center_factor = 1 / torch.exp(self.model.center_weight)
+        gt_xy, gt_valid = target['gt_xy'], target['gt_valid'].bool()
+        prev_xy, prev_pid, prev_valid = target['prev_xy'], target['prev_pid'], target['prev_valid'].bool()
+        same = (target['gt_pid'].unsqueeze(2) == prev_pid.unsqueeze(1)) & prev_valid.unsqueeze(1) & \
+            (prev_pid.unsqueeze(1) >= 0)
+        has_prev = same.any(dim=2)
+        motion_g = torch.gather(prev_xy, 1, same.float().argmax(dim=2).unsqueeze(-1).expand_as(gt_xy)) - gt_xy
+        motion_ok = has_prev & gt_valid & (motion_g.abs().amax(dim=-1) <= MAX_MOTION_CELLS)
+        B = gt_xy.shape[0]
+        n_gt = max(int(gt_valid.sum()), 1)
+        score_l = pos_l = motion_l = 0.0
+        layers = output['query_layers']
+        for layer in layers:
+            xy, logit, motion = layer['xy'], layer['logit'], layer['motion']
+            tgt = torch.zeros_like(logit)
+            pos_terms, motion_terms = [], []
+            for b in range(B):
+                g = gt_valid[b].nonzero(as_tuple=True)[0]
+                if len(g) == 0:
+                    continue
+                with torch.no_grad():
+                    dist = torch.cdist(xy[b].float(), gt_xy[b, g].float())  # K,G
+                    cost = dist / self.query_match_cells + (1 - logit[b].sigmoid()).unsqueeze(1)
+                    cost = torch.where(dist <= self.query_match_cells, cost, torch.full_like(cost, 1e6))
+                    cost_np = cost.cpu().numpy()
+                    r, c = linear_sum_assignment(cost_np)
+                    ok = cost_np[r, c] < 1e5
+                r, c = torch.as_tensor(r[ok], device=xy.device), torch.as_tensor(c[ok], device=xy.device)
+                if len(r) == 0:
+                    continue
+                tgt[b, r] = 1
+                gi = g[c]
+                pos_terms.append(torch.nn.functional.smooth_l1_loss(xy[b, r], gt_xy[b, gi], reduction='none').sum(-1))
+                mo = motion_ok[b, gi]
+                if mo.any():
+                    motion_terms.append((motion[b, r[mo]] - motion_g[b, gi[mo]]).abs().sum(-1))
+            score_l = score_l + sigmoid_focal_loss(logit, tgt, alpha=0.25, gamma=2.0, reduction='sum') / n_gt
+            if pos_terms:
+                pos_l = pos_l + torch.cat(pos_terms).mean()
+            if motion_terms:
+                motion_l = motion_l + torch.cat(motion_terms).mean()
+        L = len(layers)
+        score_l, pos_l, motion_l = score_l / L, pos_l / L, motion_l / L
+        center_img_loss = self.image_center_loss(target, output)
+        total = 10 * center_factor * center_loss + self.model.center_weight + 2 * score_l + pos_l + motion_l \
+            + center_img_loss
+        as_t = lambda v: v if torch.is_tensor(v) else torch.tensor(float(v))
+        return total, {'center_loss': 10 * center_loss, 'query_score': as_t(score_l), 'query_pos': as_t(pos_l),
+                       'query_motion': as_t(motion_l), 'center_img': center_img_loss}
+
+    def track_loss(self, track_inputs, output):
+        """R4: per round, BCE on 'still there' and smooth L1 on the new position of the people that are."""
+        valid, present, pos_valid = track_inputs['valid'], track_inputs['present'], track_inputs['pos_valid']
+        pres_l = pos_l = 0.0
+        rounds = output['track_layers']
+        for rd in rounds:
+            if valid.any():
+                pres_l = pres_l + torch.nn.functional.binary_cross_entropy_with_logits(
+                    rd['logit'][valid], present[valid].float())
+            if pos_valid.any():
+                pos_l = pos_l + torch.nn.functional.smooth_l1_loss(
+                    rd['xy'][pos_valid], track_inputs['tgt_xy'][pos_valid], reduction='none').sum(-1).mean()
+        as_t = lambda v: v if torch.is_tensor(v) else torch.tensor(float(v))
+        pres_l, pos_l = as_t(pres_l) / len(rounds), as_t(pos_l) / len(rounds)
+        return pres_l + pos_l, {'track_presence': pres_l, 'track_pos': pos_l}
+
+    def track_inputs(self, target, train):
+        if not self.track_queries:
+            return None
+        return build_track_inputs(target, self.Y, self.X, noise=self.track_noise if train else 0.0,
+                                  ghosts=self.track_ghosts, train=train)
+
+    def dense_loss(self, target, output):
         center_e = output['instance_center']
         offset_e = output['instance_offset']
         size_e = output['instance_size']
@@ -326,9 +446,10 @@ class WorldTrackModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         item, target = batch
-        output = self(item)
+        tin = self.track_inputs(target, train=True)
+        output = self(item) if tin is None else self(item, tin['xy'], tin['valid'])
 
-        total_loss, loss_dict = self.loss(target, output)
+        total_loss, loss_dict = self.loss(target, output, tin)
 
         B = item['img'].shape[0]
         self.log('train_loss', total_loss, prog_bar=True, batch_size=B)
@@ -339,12 +460,13 @@ class WorldTrackModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         item, target = batch
-        output = self(item)
+        tin = self.track_inputs(target, train=False)
+        output = self(item) if tin is None else self(item, tin['xy'], tin['valid'])
 
         if batch_idx % 100 == 1:
             self.plot_data(target, output, batch_idx)
 
-        total_loss, loss_dict = self.loss(target, output)
+        total_loss, loss_dict = self.loss(target, output, tin)
 
         B = item['img'].shape[0]
         self.log('val_loss', total_loss, batch_size=B, sync_dist=True)
