@@ -40,12 +40,12 @@ BASE_TRACKER = dict(tracker='baseline', track_buffer=5)
 def to_mem(model, xy_ref, device):
     xyz = torch.zeros(1, len(xy_ref), 3, device=device)
     xyz[0, :, :2] = torch.as_tensor(xy_ref, dtype=torch.float32, device=device)
-    return model.vox_util.Ref2Mem(xyz, model.Y, model.Z, model.X)[..., :2]
+    return model.vox_util.Ref2Mem(xyz, model.Y, model.Z, model.X)[..., :2].contiguous()
 
 
 def to_ref(model, xy_mem):
     xyz = torch.cat([xy_mem, torch.zeros_like(xy_mem[..., :1])], dim=-1)
-    return model.vox_util.Mem2Ref(xyz, model.Y, model.Z, model.X)[..., :2]
+    return model.vox_util.Mem2Ref(xyz, model.Y, model.Z, model.X)[..., :2].contiguous()
 
 
 @torch.no_grad()

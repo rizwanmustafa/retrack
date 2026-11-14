@@ -78,8 +78,8 @@ class ViewSampler:
         gy, gx = utils.basic.normalize_grid2d(v, u, Hf, Wf)
         grid = torch.stack([gx, gy], dim=-1).unsqueeze(1).to(self.feat.dtype)  # B*S,1,N,2
         val = F.grid_sample(self.feat, grid, mode='bilinear', align_corners=False)[:, :, 0]  # B*S,C,N
-        val = val.view(B, S, C, P, Hh)
-        w = valid.view(B, S, 1, P, Hh).to(val.dtype)
+        val = val.reshape(B, S, C, P, Hh)
+        w = valid.reshape(B, S, 1, P, Hh).to(val.dtype)
         if self.cam_mask is not None:
             w = w * self.cam_mask.view(B, S, 1, 1, 1).to(val.dtype)
         cnt = w.sum(dim=1)  # B,1,P,Hh

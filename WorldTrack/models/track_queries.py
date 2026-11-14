@@ -48,6 +48,7 @@ class TrackQueryHead(nn.Module):
 
     def forward(self, track_xy, track_valid, sample, Y, X):
         """track_xy: B,T,2 (mem), track_valid: B,T bool, sample: fn(B,P,2) -> B,P,feat_dim"""
+        track_xy = track_xy.contiguous()
         B, T, _ = track_xy.shape
         G2 = self.unit.shape[0]
         pad = ~track_valid.bool()
@@ -60,7 +61,7 @@ class TrackQueryHead(nn.Module):
             off = self.unit * spacing  # G2,2
             pts = center.unsqueeze(2) + off.view(1, 1, G2, 2)
             pts = torch.minimum(torch.maximum(pts, torch.zeros_like(lim)), lim)
-            f = self.inp(sample(pts.view(B, T * G2, 2))).view(B, T, G2, self.d) + self.off_emb(off / 12.0)
+            f = self.inp(sample(pts.reshape(B, T * G2, 2))).reshape(B, T, G2, self.d) + self.off_emb(off / 12.0)
             att = torch.einsum('btd,btgd->btg', rd['q'](e), rd['k'](f)) / self.d ** 0.5
             pooled = torch.einsum('btg,btgd->btd', att.softmax(dim=-1), rd['v'](f))
             h = rd['norm1'](e + pooled)
