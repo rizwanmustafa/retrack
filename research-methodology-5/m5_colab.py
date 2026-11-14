@@ -22,8 +22,15 @@ OUT = f'{RESULTS}/m5'
 
 
 def sh(cmd):
+    """Runs a shell command and streams its output into the notebook (Colab does not show the output of
+    subprocess.run), raising on failure."""
     print('$', cmd, flush=True)
-    subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+    p = subprocess.Popen(cmd, shell=True, executable='/bin/bash', stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, bufsize=1)
+    for line in p.stdout:
+        print(line, end='', flush=True)
+    if p.wait():
+        raise subprocess.CalledProcessError(p.returncode, cmd)
 
 
 from google.colab import drive  # noqa: E402

@@ -25,12 +25,17 @@ WILDTRACK configuration. Every difference between two variants is a difference i
 | TrackTacular (Teepe et al., CVPRW 2024) | Lifts ResNet-18 features to a voxel grid, dense BEV decoder, each detection predicts its previous position | Per-camera features, dense decoding, tracker outside the network |
 | MV2GF (arXiv 2608.20639) | Frozen DA3-Giant + ResNet-18, pixels placed by DA3 point maps, max-pooled; 94.7 MODA on WILDTRACK | Detection only (no tracking); 1.4 B parameters, 3.3 FPS |
 | CAT-Free (arXiv 2609.34302) | Training-free: VGGT-Ω cameras, YOLO, ray triangulation, OSNet | 89.2 MODA / 90.8 MOTA / 90.4 IDF1 on WILDTRACK — robust, but less accurate |
-| DETR3D / Sparse4D (driving) | Object queries sample image features by projecting 3D reference points | Not studied on WILDTRACK/MultiviewX pedestrian tracking |
-| Tracktor, MOTR (single camera) | Existing tracks regress their new position / are propagated as queries | Not in multi-view BEV pedestrian tracking |
+| DETR3D / Sparse4D (driving) | Object queries sample image features by projecting 3D reference points | Sparse4D was only tested zero-shot on WILDTRACK (arXiv 2602.00450); not trained for pedestrian tracking |
+| Tracktor, MOTR (single camera) | Existing tracks regress their new position / are propagated as queries | Single camera |
+| **MVTrackTrans** (Zhang et al., CVPR 2026, P44) | **Track queries** sampled at the previous detections from the previous frame's ground features, refined by cross-attention with view queries and ground features (deformable attention), decode motion offsets; WILDTRACK and MultiviewX | ResNet backbone; people are still decoded from a **dense** ground heatmap; tracks are not a tracker-state input and there is no presence output |
 
-Our claim, to be confirmed by the factorial study, is the combination: a multi-view tracker whose image features come
-from a cross-view geometric foundation model (R1), decoded by sparse ground-anchored queries (R2), with tracks as a
-network input (R4), at a small fraction of MV2GF's size (DA3-Base, 0.12 B, frozen).
+**Novelty, honestly.** Each component has a close precedent: R1 is the idea of MV2GF (frozen DA3 features fused with
+ResNet-18), R4 is close to MVTrackTrans's track queries, and R2 is DETR3D/Sparse4D-style decoding. What we did not find
+published (papers in this repository and a web search, Nov 2026): (a) multi-view *tracking* on geometric foundation
+features (MV2GF is detection only), (b) replacing the dense BEV decoder with sparse queries that read the camera
+features directly, on these datasets, (c) tracks as a tracker-state input with a presence output, and (d) a controlled
+factorial study of the three on both datasets with camera removal. The defensible contribution is the combination and
+the study, not any single module; MVTrackTrans (public code) and MV2GF are the comparisons a reviewer will ask for.
 
 ## 3. Architecture
 
