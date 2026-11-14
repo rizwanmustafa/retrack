@@ -1,6 +1,6 @@
 # Open failures and to-do list (research methodology 5)
 
-Logged 2026-11-15, after the first 13 of 16 runs of the 2^3 factorial (seed 80085). This is the agreed next direction.
+Logged 2026-11-15, after the 2^3 factorial (seed 80085; all 16 runs complete, REPORT.md of 2026-11-14 22:52). This is the agreed next direction.
 If the work moves elsewhere, check this list first.
 
 ## Results so far (all cameras, MODA / MOTA / IDF1)
@@ -12,9 +12,21 @@ If the work moves elsewhere, check this list first.
 | R2 | 91.81 / 91.70 / 95.19 | 94.31 / 90.76 / 85.48 |
 | R4 | 89.81 / 88.34 / 89.86 [87.08 / 92.19] | 95.72 / 92.44 / 78.84 [91.16 / 80.32] |
 | R12 | 87.71 / 88.24 / 93.92 | 94.51 / 90.16 / 81.99 |
-| R14 | 91.70 / 90.23 / 90.40 [90.55 / 94.83] | pending |
+| R14 | 91.70 / 90.23 / 90.40 [90.55 / 94.83] | 96.39 / 91.23 / 79.17 [91.83 / 83.36] |
 | R124 | 90.34 / 88.87 / 91.17 [89.81 / 94.69] | 95.18 / 91.83 / 73.44 [90.96 / 83.98] |
-| R24 | pending | pending |
+| R24 | 91.07 / 90.65 / 95.17 [90.44 / 95.17] | 94.18 / 92.50 / 77.02 [90.63 / 83.24] |
+
+Camera removal, MODA at k=3 (mean over all combinations; B0 = 83.02 WILDTRACK, 80.66 MultiviewX):
+
+| | R1 | R2 | R4 | R12 | R14 | R24 | R124 |
+|---|---|---|---|---|---|---|---|
+| WILDTRACK | 83.14 | 80.13 | 82.80 | 78.15 | **84.07** | 79.44 | 79.97 |
+| MultiviewX | **82.96** | 77.50 | 80.34 | 78.79 | 82.80 | 77.59 | 79.99 |
+
+- **R2's all-camera tracking gain reverses under camera removal.** Its main effect over all conditions is -3.07 MODA on WILDTRACK and -2.79 on MultiviewX.
+- **R1 (DA3) is the only component that helps when cameras are missing**, and only on MultiviewX: +1.62 MODA and +1.42 MOTA over all conditions, +2.3 MODA at k=3. On WILDTRACK it is neutral. Hypothesis: stronger per-view evidence lowers the number of views needed. Test it by running `m5_diagnose.py` on R1 and R2 and comparing the miss rate by working cameras with B0's.
+- **R1 and R2 raise MODP (localisation precision).** On WILDTRACK it goes from 69.6 to 76-78 in all six R1/R2 variants; on MultiviewX from 85.5 to 90.2 with R1. But E0's MODP varied ±4.1 between seeds.
+- **R4 trained as an auxiliary head helps TrackTacular's tracker on MultiviewX** (base IDF1 83.2-84.0 against 80.3). Its own tracker hurts IDF1 everywhere (main effect over all conditions -4.7 on WILDTRACK, -7.2 on MultiviewX).
 
 Brackets: TrackTacular's tracker on the same detections. Only one seed was run; two earlier seeds of the baseline differed by about 1 point.
 
