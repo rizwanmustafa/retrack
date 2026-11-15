@@ -6,6 +6,7 @@ import numpy as np
 
 from models import Segnet, MVDet, Liftnet, Bevformernet
 from models.loss import FocalLoss, compute_rot_loss
+from models.query_decoder import MAX_MOTION_CELLS
 from tracking.multitracker import JDETracker
 from utils import vox, basic, decode
 from evaluation.mod import modMetricsCalculator
@@ -29,6 +30,12 @@ class WorldTrackModel(pl.LightningModule):
             use_temporal_cache=True,
             z_sign=1,
             feat2d_dim=128,
+            # R2 (segnet only): sparse person queries instead of the dense BEV decoder
+            sparse_queries=False,
+            num_queries=100,
+            query_layers=3,
+            query_heights=4,
+            query_match_cells=10.0,  # a query is assigned to a person only within 10 BEV cells (1 m)
     ):
         super().__init__()
         self.model_name = model_name
@@ -59,9 +66,14 @@ class WorldTrackModel(pl.LightningModule):
 
         # Model
         num_cameras = None if num_cameras == 0 else num_cameras
+        assert model_name == 'segnet' or not sparse_queries, 'sparse_queries (R2) is implemented for segnet only'
+        self.sparse_queries = sparse_queries
+        self.query_match_cells = query_match_cells
         if model_name == 'segnet':
             self.model = Segnet(self.Y, self.Z, self.X, num_cameras=num_cameras, feat2d_dim=feat2d_dim,
-                                encoder_type=self.encoder_name, num_classes=num_classes, z_sign=z_sign)
+                                encoder_type=self.encoder_name, num_classes=num_classes, z_sign=z_sign,
+                                sparse_queries=sparse_queries, num_queries=num_queries, query_layers=query_layers,
+                                query_heights=query_heights)
         elif model_name == 'liftnet':
             self.model = Liftnet(self.Y, self.Z, self.X, encoder_type=self.encoder_name, feat2d_dim=feat2d_dim,
                                  DMIN=self.DMIN, DMAX=self.DMAX, D=self.D, num_classes=num_classes, z_sign=z_sign,
@@ -89,6 +101,8 @@ class WorldTrackModel(pl.LightningModule):
         vox_util: vox util object
         """
         prev_bev = self.load_cache(item['frame'].cpu())
+        # item['cam_mask'] (B,S, 1 = working) switches cameras off; set by the evaluation / visual tools only
+        kwargs = {'cam_mask': item['cam_mask']} if item.get('cam_mask') is not None else {}
 
         output = self.model(
             rgb_cams=item['img'],
@@ -97,6 +111,7 @@ class WorldTrackModel(pl.LightningModule):
             ref_T_global=item['ref_T_global'],
             vox_util=self.vox_util,
             prev_bev=prev_bev,
+            **kwargs,
         )
 
         if self.use_temporal_cache:
@@ -134,6 +149,72 @@ class WorldTrackModel(pl.LightningModule):
             self.temporal_cache_frames[i[0]] = frame
 
     def loss(self, target, output):
+        if 'query_layers' in output:
+            return self.sparse_loss(target, output)
+        return self.dense_loss(target, output)
+
+    def sparse_loss(self, target, output):
+        """R2: focal loss on the proposal heatmap (same target and uncertainty weighting as the baseline's centre
+        heatmap) + per decoder layer, after one-to-one Hungarian assignment of queries to people: sigmoid focal loss
+        on the scores, smooth L1 on the positions and L1 on the motion to the previous frame. The image foot-point
+        loss is the baseline's."""
+        from scipy.optimize import linear_sum_assignment
+        from torchvision.ops import sigmoid_focal_loss
+        center_loss = self.center_loss_fn(basic.sigmoid(output['proposal_center']), target['center_bev'])
+        center_factor = 1 / torch.exp(self.model.center_weight)
+        gt_xy, gt_valid = target['gt_xy'], target['gt_valid'].bool()
+        prev_xy, prev_pid, prev_valid = target['prev_xy'], target['prev_pid'], target['prev_valid'].bool()
+        same = (target['gt_pid'].unsqueeze(2) == prev_pid.unsqueeze(1)) & prev_valid.unsqueeze(1) & \
+            (prev_pid.unsqueeze(1) >= 0)
+        has_prev = same.any(dim=2)
+        motion_g = torch.gather(prev_xy, 1, same.float().argmax(dim=2).unsqueeze(-1).expand_as(gt_xy)) - gt_xy
+        motion_ok = has_prev & gt_valid & (motion_g.abs().amax(dim=-1) <= MAX_MOTION_CELLS)
+        B = gt_xy.shape[0]
+        n_gt = max(int(gt_valid.sum()), 1)
+        score_l = pos_l = motion_l = 0.0
+        layers = output['query_layers']
+        for layer in layers:
+            xy, logit, motion = layer['xy'], layer['logit'], layer['motion']
+            tgt = torch.zeros_like(logit)
+            pos_terms, motion_terms = [], []
+            for b in range(B):
+                g = gt_valid[b].nonzero(as_tuple=True)[0]
+                if len(g) == 0:
+                    continue
+                with torch.no_grad():
+                    dist = torch.cdist(xy[b].float(), gt_xy[b, g].float())  # K,G
+                    cost = dist / self.query_match_cells + (1 - logit[b].sigmoid()).unsqueeze(1)
+                    cost = torch.where(dist <= self.query_match_cells, cost, torch.full_like(cost, 1e6))
+                    cost_np = cost.cpu().numpy()
+                    r, c = linear_sum_assignment(cost_np)
+                    ok = cost_np[r, c] < 1e5
+                r, c = torch.as_tensor(r[ok], device=xy.device), torch.as_tensor(c[ok], device=xy.device)
+                if len(r) == 0:
+                    continue
+                tgt[b, r] = 1
+                gi = g[c]
+                pos_terms.append(torch.nn.functional.smooth_l1_loss(xy[b, r], gt_xy[b, gi], reduction='none').sum(-1))
+                mo = motion_ok[b, gi]
+                if mo.any():
+                    motion_terms.append((motion[b, r[mo]] - motion_g[b, gi[mo]]).abs().sum(-1))
+            score_l = score_l + sigmoid_focal_loss(logit, tgt, alpha=0.25, gamma=2.0, reduction='sum') / n_gt
+            if pos_terms:
+                pos_l = pos_l + torch.cat(pos_terms).mean()
+            if motion_terms:
+                motion_l = motion_l + torch.cat(motion_terms).mean()
+        L = len(layers)
+        score_l, pos_l, motion_l = score_l / L, pos_l / L, motion_l / L
+        B, S = target['center_img'].shape[:2]
+        center_img_g = basic.pack_seqdim(target['center_img'], B)
+        center_img_loss = self.center_loss_fn(basic.sigmoid(output['img_center']), center_img_g) / S
+        total = 10 * center_factor * center_loss + self.model.center_weight + 2 * score_l + pos_l + motion_l \
+            + center_img_loss
+        as_t = lambda v: v if torch.is_tensor(v) else torch.tensor(float(v))  # noqa: E731
+        return total, {'center_loss': 10 * center_loss, 'query_score': as_t(score_l), 'query_pos': as_t(pos_l),
+                       'query_motion': as_t(motion_l), 'center_img': center_img_loss}
+
+    def dense_loss(self, target, output):
+        """TrackTacular's loss (unchanged)."""
         center_e = output['instance_center']
         offset_e = output['instance_offset']
         size_e = output['instance_size']

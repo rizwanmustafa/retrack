@@ -1,3 +1,18 @@
+# This branch: TrackTacular + R2 (sparse person queries)
+
+`feat/r2-sparse-queries` is the original TrackTacular code (below) with one architectural change and the tools to
+train, evaluate and look at it on Google Colab:
+
+| | |
+|---|---|
+| **R2** | `--model.sparse_queries true` (`WorldTrack/configs/m_r2.yml`). TrackTacular's dense U-Net BEV decoder is replaced by ~100 person queries: they start at the strongest cells of a BEV heatmap, look at each other (self-attention), read the image features of every camera at 4 heights above their ground position, and refine position, score and motion over 3 rounds (`WorldTrack/models/query_decoder.py`, loss `sparse_loss` in `WorldTrack/world_track.py`). Encoder, lifting, camera fusion, tracker and metrics are TrackTacular's. |
+| **two fixes** | previous-frame people are shifted with the same training augmentation as the current frame (`datasets/pedestrian_dataset.py`); cameras get the reference frame of their own sample in a batch (`repeat_interleave` in `models/segnet.py`) |
+| **camera removal** | `item['cam_mask']` switches cameras off at evaluation time (their lifted features become zeros) |
+| **Colab** | `colab/train_eval.py` (train + evaluate B0 and R2, report), `colab/viz.py` (interactive visual tools for any B0/R2 checkpoint); see **[colab/README.md](colab/README.md)** (quick start) and **[colab/TOOLS.md](colab/TOOLS.md)** (full documentation) |
+| **evaluation** | `WorldTrack/evaluation/r2_eval.py`: MODA/MODP/precision/recall and MOTA/IDF1 with all cameras and every combination of up to 3 removed cameras |
+
+---
+
 # TrackTacular :octopus:
 
 **Lifting Multi-View Detection and Tracking to the Bird’s Eye View**

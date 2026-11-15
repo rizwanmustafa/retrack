@@ -123,6 +123,20 @@ class PedestrianDataset(VisionDataset):
                     # x1y1x2y2
                     self.imgs_gt[frame][cam] = (torch.tensor(img_bboxs[cam]), torch.tensor(img_pids[cam]))
 
+    def people_list(self, mem_pts, pids, prefix):
+        """{prefix}_xy (M,2) mem x,y; {prefix}_pid (M,) person id or -1; {prefix}_valid (M,) inside the BEV grid"""
+        M = self.max_objects
+        xy = torch.zeros((M, 2), dtype=torch.float32)
+        pid = torch.full((M,), -1, dtype=torch.long)
+        valid = torch.zeros((M,), dtype=torch.bool)
+        n = min(mem_pts.shape[1], M)
+        if n:
+            p = mem_pts[0, :n, :2].float()
+            xy[:n] = p
+            pid[:n] = pids[:n].long()
+            valid[:n] = (p[:, 0] >= 0) & (p[:, 0] < self.X) & (p[:, 1] >= 0) & (p[:, 1] < self.Y)
+        return {f'{prefix}_xy': xy, f'{prefix}_pid': pid, f'{prefix}_valid': valid}
+
     def get_bev_gt(self, mem_pts, mem_pts_prev, pids, pids_pre):
         center = torch.zeros((1, self.Y, self.X), dtype=torch.float32)
         valid_mask = torch.zeros((1, self.Y, self.X), dtype=torch.bool)
@@ -277,7 +291,8 @@ class PedestrianDataset(VisionDataset):
         worldgrid_pts_pre, world_pid_pre = self.world_gt[pre_frame]
 
         worldgrid_pts = torch.cat((worldgrid_pts_org, torch.zeros_like(worldgrid_pts_org[:, 0:1])), dim=1).unsqueeze(0)
-        worldgrid_pts_pre = torch.cat((worldgrid_pts_pre, torch.zeros_like(worldgrid_pts_pre[:, 0:1])), dim=1)
+        worldgrid_pts_pre = torch.cat((worldgrid_pts_pre, torch.zeros_like(worldgrid_pts_pre[:, 0:1])),
+                                      dim=1).unsqueeze(0)
 
         if self.is_train:
             Rz = torch.eye(3)
@@ -287,9 +302,11 @@ class PedestrianDataset(VisionDataset):
             augment = geom.merge_rt(Rz.unsqueeze(0), -scene_center.unsqueeze(0)).squeeze()
             worldgrid_T_worldcoord = torch.matmul(augment, worldgrid_T_worldcoord)
             worldgrid_pts = geom.apply_4x4(augment.unsqueeze(0), worldgrid_pts)
+            # fix: the previous-frame people (target of the motion offset) live in the same shifted reference frame
+            worldgrid_pts_pre = geom.apply_4x4(augment.unsqueeze(0), worldgrid_pts_pre)
 
         mem_pts = self.vox_util.Ref2Mem(worldgrid_pts, self.Y, self.Z, self.X)
-        mem_pts_pre = self.vox_util.Ref2Mem(worldgrid_pts_pre.unsqueeze(0), self.Y, self.Z, self.X)
+        mem_pts_pre = self.vox_util.Ref2Mem(worldgrid_pts_pre, self.Y, self.Z, self.X)
         center_bev, valid_bev, pid_bev, offset_bev = self.get_bev_gt(mem_pts, mem_pts_pre,  world_pids, world_pid_pre)
 
         grid_gt = torch.zeros((self.max_objects, 3), dtype=torch.long)
@@ -317,7 +334,11 @@ class PedestrianDataset(VisionDataset):
             'offset_img': offsets_img,  # S,2,H/8,W/8
             'size_img': sizes_img,  # S,2,H/8,W/8
             'valid_img': valids_img,  # S,1,H/8,W/8
-            'pid_img': pids_img  # S,1,H/8,W/8
+            'pid_img': pids_img,  # S,1,H/8,W/8
         }
+        # R2 (one-to-one assignment of queries to people): the people of frames t and t-1 as padded lists in BEV
+        # mem coordinates, in the same reference frame as the heatmap targets
+        target.update(self.people_list(mem_pts, world_pids, 'gt'))
+        target.update(self.people_list(mem_pts_pre, world_pid_pre, 'prev'))
 
         return item, target

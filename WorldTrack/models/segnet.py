@@ -7,6 +7,7 @@ import utils.basic
 
 from models.encoder import Encoder_res101, Encoder_res50, Encoder_res18, Encoder_eff, Encoder_swin_t
 from models.decoder import Decoder
+from models.query_decoder import SparseQueryDecoder, ImageCenterHead, ViewSampler
 
 
 class Segnet(nn.Module):
@@ -19,9 +20,23 @@ class Segnet(nn.Module):
                  num_cameras=None,
                  z_sign=1,
                  encoder_type='swin_t',
-                 device=torch.device('cuda')):
+                 sparse_queries=False,
+                 num_queries=100,
+                 query_layers=3,
+                 query_heights=4,
+                 device=None):
+        """
+        sparse_queries: R2. The dense BEV decoder (models/decoder.py) is replaced by sparse ground-anchored person
+                        queries that also read the image features of every camera (models/query_decoder.py).
+                        Everything before the decoder (encoder, lifting, camera fusion, BEV compressor) is unchanged.
+        device: unused (kept for compatibility); the normalisation constants are buffers that follow the model.
+        """
         super(Segnet, self).__init__()
         assert (encoder_type in ['res101', 'res50', 'effb0', 'effb4', 'res18', 'vgg11', 'swin_t'])
+        self.sparse = sparse_queries
+        self.query_heights = query_heights
+        if sparse_queries:
+            assert not rand_flip, 'R2 does not flip features'
 
         self.Y, self.Z, self.X = Y, Z, X
         self.do_rgbcompress = do_rgbcompress
@@ -31,8 +46,8 @@ class Segnet(nn.Module):
         self.z_sign = z_sign
         self.num_cameras = num_cameras
 
-        self.mean = torch.as_tensor([0.485, 0.456, 0.406], device=device).reshape(1, 3, 1, 1)
-        self.std = torch.as_tensor([0.229, 0.224, 0.225], device=device).reshape(1, 3, 1, 1)
+        self.register_buffer('mean', torch.as_tensor([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1), persistent=False)
+        self.register_buffer('std', torch.as_tensor([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1), persistent=False)
 
         # Encoder
         self.feat2d_dim = feat2d_dim
@@ -69,12 +84,17 @@ class Segnet(nn.Module):
             nn.Conv2d(latent_dim, latent_dim, kernel_size=1),
         )
 
-        # Decoder
-        self.decoder = Decoder(
-            in_channels=latent_dim,
-            n_classes=num_classes,
-            feat2d=self.feat2d_dim,
-        )
+        # Decoder: dense BEV decoder (TrackTacular) or R2's sparse query decoder
+        if self.sparse:
+            self.query_decoder = SparseQueryDecoder(bev_dim=latent_dim, img_dim=feat2d_dim, num_queries=num_queries,
+                                                    num_layers=query_layers, num_heights=query_heights)
+            self.img_head = ImageCenterHead(feat2d_dim, n_classes=num_classes)
+        else:
+            self.decoder = Decoder(
+                in_channels=latent_dim,
+                n_classes=num_classes,
+                feat2d=self.feat2d_dim,
+            )
 
         # Weights
         self.center_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
@@ -83,7 +103,7 @@ class Segnet(nn.Module):
         self.size_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
         self.rot_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
 
-    def forward(self, rgb_cams, pix_T_cams, cams_T_global, vox_util, ref_T_global, prev_bev=None):
+    def forward(self, rgb_cams, pix_T_cams, cams_T_global, vox_util, ref_T_global, prev_bev=None, cam_mask=None):
         """
         B = batch size, S = number of cameras, C = 3, H = img height, W = img width
         rgb_cams: (B,S,C,H,W)
@@ -91,6 +111,7 @@ class Segnet(nn.Module):
         cams_T_global: (B,S,4,4)
         vox_util: vox util object
         ref_T_global: (B,4,4)
+        cam_mask: (B,S) 1 = camera working, 0 = camera switched off (its lifted features are zeroed); None = all
         rad_occ_mem0:
             - None when use_radar = False, use_lidar = False
             - (B, 1, Z, Y, X) when use_radar = True, use_metaradar = False
@@ -107,7 +128,9 @@ class Segnet(nn.Module):
         cams_T_global_ = __p(cams_T_global)  # B*S,4,4
 
         global_T_cams_ = torch.inverse(cams_T_global_)  # B*S,4,4
-        ref_T_cams = torch.matmul(ref_T_global.repeat(S, 1, 1), global_T_cams_)  # B*S,4,4
+        # fix: repeat_interleave matches pack_seqdim's b-major order (repeat() gave camera i the reference frame of
+        # sample i % B, which differs between the samples of a batch by the training shift augmentation)
+        ref_T_cams = torch.matmul(ref_T_global.repeat_interleave(S, dim=0), global_T_cams_)  # B*S,4,4
         cams_T_ref_ = torch.inverse(ref_T_cams)  # B*S,4,4
 
         # rgb encoder
@@ -129,12 +152,15 @@ class Segnet(nn.Module):
         featpix_T_cams_ = utils.geom.scale_intrinsics(pix_T_cams_, sx, sy)
 
         # unproject image feature to 3d grid
+        featpix_T_ref_ = utils.basic.matmul2(featpix_T_cams_, cams_T_ref_)  # B*S,4,4
         feat_mems_ = vox_util.unproject_image_to_mem(
             feat_cams_,  # B*S,128,H/8,W/8
-            utils.basic.matmul2(featpix_T_cams_, cams_T_ref_),  # featpix_T_ref  B*S,4,4
+            featpix_T_ref_,  # featpix_T_ref  B*S,4,4
             cams_T_ref_, Y, Z, X,
             xyz_refA=None, z_sign=self.z_sign)
         feat_mems = __u(feat_mems_)  # B, S, C, Z, Y, X
+        if cam_mask is not None:  # switched-off cameras: their slot of the fusion is zeros
+            feat_mems = feat_mems * cam_mask.to(feat_mems.dtype).view(B, S, 1, 1, 1, 1)
 
         # rgb_cams_raw = rgb_cams_ * self.std.to(device) + self.mean.to(device)
         # rgb_mem_ = vox_util.unproject_image_to_mem(
@@ -171,6 +197,13 @@ class Segnet(nn.Module):
         feat_bev = self.temporal_bev(feat_bev)
 
         # bev decoder
-        out_dict = self.decoder(feat_bev, feat_cams_)
+        if self.sparse:
+            view_sampler = ViewSampler(feat_cams_, featpix_T_ref_, cams_T_ref_, cam_mask, vox_util, (Y, Z, X),
+                                       self.z_sign, B, S, self.query_heights)
+            out_dict = self.query_decoder(feat_bev, view_sampler)
+            out_dict.update({'bev_raw': feat_bev, 'bev_feat': feat_bev, 'img_raw_feat': feat_cams_,
+                             'img_center': self.img_head(feat_cams_)})
+        else:
+            out_dict = self.decoder(feat_bev, feat_cams_)
 
         return out_dict
