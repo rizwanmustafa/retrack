@@ -330,11 +330,11 @@ class PedestrianDataset(VisionDataset):
             'offset_bev': offset_bev,  # 2,Y,X
             'pid_bev': pid_bev,  # 1,Y,X
             # img
-            'center_img': centers_img,  # S,1,H/8,W/8
-            'offset_img': offsets_img,  # S,2,H/8,W/8
-            'size_img': sizes_img,  # S,2,H/8,W/8
-            'valid_img': valids_img,  # S,1,H/8,W/8
-            'pid_img': pids_img,  # S,1,H/8,W/8
+            'center_img': centers_img,  # S,1,H/4,W/4
+            'offset_img': offsets_img,  # S,2,H/4,W/4
+            'size_img': sizes_img,  # S,2,H/4,W/4
+            'valid_img': valids_img,  # S,1,H/4,W/4
+            'pid_img': pids_img,  # S,1,H/4,W/4
         }
         # R2 (one-to-one assignment of queries to people): the people of frames t and t-1 as padded lists in BEV
         # mem coordinates, in the same reference frame as the heatmap targets

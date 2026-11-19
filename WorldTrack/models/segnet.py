@@ -140,7 +140,7 @@ class Segnet(nn.Module):
             B0, _, _, _ = rgb_cams_.shape
             self.rgb_flip_index = np.random.choice([0, 1], B0).astype(bool)
             rgb_cams_[self.rgb_flip_index] = torch.flip(rgb_cams_[self.rgb_flip_index], [-1])
-        feat_cams_ = self.encoder(rgb_cams_)  # B*S,128,H/8,W/8
+        feat_cams_ = self.encoder(rgb_cams_)  # B*S,128,H/4,W/4
         if self.rand_flip:
             feat_cams_[self.rgb_flip_index] = torch.flip(feat_cams_[self.rgb_flip_index], [-1])
         _, C, Hf, Wf = feat_cams_.shape
@@ -154,7 +154,7 @@ class Segnet(nn.Module):
         # unproject image feature to 3d grid
         featpix_T_ref_ = utils.basic.matmul2(featpix_T_cams_, cams_T_ref_)  # B*S,4,4
         feat_mems_ = vox_util.unproject_image_to_mem(
-            feat_cams_,  # B*S,128,H/8,W/8
+            feat_cams_,  # B*S,128,H/4,W/4
             featpix_T_ref_,  # featpix_T_ref  B*S,4,4
             cams_T_ref_, Y, Z, X,
             xyz_refA=None, z_sign=self.z_sign)
@@ -164,7 +164,7 @@ class Segnet(nn.Module):
 
         # rgb_cams_raw = rgb_cams_ * self.std.to(device) + self.mean.to(device)
         # rgb_mem_ = vox_util.unproject_image_to_mem(
-        #     rgb_cams_raw,  # B*S,128,H/8,W/8
+        #     rgb_cams_raw,  # B*S,128,H/4,W/4
         #     utils.basic.matmul2(pix_T_cams_, cams_T_ref_),  # featpix_T_ref  B*S,4,4
         #     cams_T_ref_, Y, Z, X, z_sign=self.z_sign,
         #     xyz_refA=None)

@@ -152,7 +152,7 @@ class Liftnet(nn.Module):
             B0, _, _, _ = rgb_cams_.shape
             self.rgb_flip_index = np.random.choice([0, 1], B0).astype(bool)
             rgb_cams_[self.rgb_flip_index] = torch.flip(rgb_cams_[self.rgb_flip_index], [-1])
-        feat_cams_ = self.encoder(rgb_cams_)  # S,(D+C),H/8,W/8
+        feat_cams_ = self.encoder(rgb_cams_)  # S,(D+C),H/4,W/4
         if self.rand_flip:
             feat_cams_[self.rgb_flip_index] = torch.flip(feat_cams_[self.rgb_flip_index], [-1])
         _, CD, Hf, Wf = feat_cams_.shape

@@ -341,7 +341,7 @@ class VoxelUtil:
     def warp_tiled_to_mem(self, rgb_tileB, pixB_T_ref, camB_T_ref, Y, Z, X, DMIN, DMAX, assert_cube=False, z_sign=1):
         """
         B = batch size, S = number of cameras, C = latent dim, D = depth, H = img height, W = img width
-        rgb_tileB: B*S,C,D,H/8,W/8
+        rgb_tileB: B*S,C,D,H/4,W/4
         pixB_T_ref: B*S,4,4
         camB_T_ref: B*S,4,4
 

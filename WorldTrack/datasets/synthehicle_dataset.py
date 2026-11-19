@@ -394,11 +394,11 @@ class SynthehicleDataset(VisionDataset):
             'rotbin_bev': rotbin_bev,  # 2,Y,X
             'rotres_bev': rotres_bev,  # 2,Y,Xv
             # img
-            'center_img': centers_img,  # S,1,H/8,W/8
-            'offset_img': offsets_img,  # S,2,H/8,W/8
-            'size_img': sizes_img,  # S,2,H/8,W/8
-            'valid_img': valids_img,  # S,1,H/8,W/8
-            'pid_img': tids_img,  # S,1,H/8,W/8
+            'center_img': centers_img,  # S,1,H/4,W/4
+            'offset_img': offsets_img,  # S,2,H/4,W/4
+            'size_img': sizes_img,  # S,2,H/4,W/4
+            'valid_img': valids_img,  # S,1,H/4,W/4
+            'pid_img': tids_img,  # S,1,H/4,W/4
         }
 
         return item, target
