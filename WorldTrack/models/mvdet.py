@@ -123,7 +123,7 @@ class MVDet(nn.Module):
 
         if self.num_cameras is None:
             mask_mems = (torch.abs(feat_mems) > 0).float()
-            feat_mem = utils.basic.reduce_masked_mean(feat_mems, mask_mems, dim=1)  # B, C, Z, Y, X
+            feat_mem = utils.basic.reduce_masked_mean(feat_mems, mask_mems, dim=1)  # B, C, Y, X
         else:
             feat_mem = self.cam_compressor(feat_mems.flatten(1, 2))
 

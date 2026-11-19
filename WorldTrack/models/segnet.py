@@ -158,7 +158,7 @@ class Segnet(nn.Module):
             featpix_T_ref_,  # featpix_T_ref  B*S,4,4
             cams_T_ref_, Y, Z, X,
             xyz_refA=None, z_sign=self.z_sign)
-        feat_mems = __u(feat_mems_)  # B, S, C, Z, Y, X
+        feat_mems = __u(feat_mems_)  # B, S, C, Y, Z, X
         if cam_mask is not None:  # switched-off cameras: their slot of the fusion is zeros
             feat_mems = feat_mems * cam_mask.to(feat_mems.dtype).view(B, S, 1, 1, 1, 1)
 
@@ -168,7 +168,7 @@ class Segnet(nn.Module):
         #     utils.basic.matmul2(pix_T_cams_, cams_T_ref_),  # featpix_T_ref  B*S,4,4
         #     cams_T_ref_, Y, Z, X, z_sign=self.z_sign,
         #     xyz_refA=None)
-        # rgb_mems = __u(rgb_mem_)  # B, S, C, Z, Y, X
+        # rgb_mems = __u(rgb_mem_)  # B, S, C, Y, Z, X
         # mask_mems = (torch.abs(rgb_mems) > 0).float()
         # rgb_mem = utils.basic.reduce_masked_mean(rgb_mems, mask_mems, dim=1)
         # import matplotlib.pyplot as plt
@@ -177,7 +177,7 @@ class Segnet(nn.Module):
 
         if self.num_cameras is None:
             mask_mems = (torch.abs(feat_mems) > 0).float()
-            feat_mem = utils.basic.reduce_masked_mean(feat_mems, mask_mems, dim=1)  # B, C, Z, Y, X
+            feat_mem = utils.basic.reduce_masked_mean(feat_mems, mask_mems, dim=1)  # B, C, Y, Z, X
         else:
             feat_mem = self.cam_compressor(feat_mems.flatten(1, 2))
 
